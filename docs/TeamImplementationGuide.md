@@ -203,7 +203,7 @@ lib/supabaseClient      Supabaseクライアント
 
 ### 実装手順
 
-1. SupabaseプロジェクトのURLとanon keyを受け取る
+1. SupabaseプロジェクトのURLとpublishable keyを受け取る
 2. フロント側にSupabaseクライアントを作る
 3. `/login` 画面を作る
 4. メールアドレス + パスワードで新規登録できるようにする
@@ -410,7 +410,7 @@ PUT /me/preferences
 
 ```text
 NEXT_PUBLIC_SUPABASE_URL
-NEXT_PUBLIC_SUPABASE_ANON_KEY
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 NEXT_PUBLIC_API_BASE_URL
 ```
 
@@ -418,7 +418,7 @@ NEXT_PUBLIC_API_BASE_URL
 
 ```text
 SUPABASE_URL
-SUPABASE_SERVICE_ROLE_KEY
+SUPABASE_SECRET_KEY
 GEMINI_API_KEY
 FRONTEND_ORIGIN
 ```
