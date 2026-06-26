@@ -211,10 +211,10 @@ export default function SwipePage() {
       </div>
 
       {/* 背景 */}
-      <div className="absolute inset-0 flex items-center justify-center px-8">
+      <div className="absolute inset-0 flex items-start justify-center px-8 pt-35">
         <div className="text-center max-w-xl">
-          <h1 className="text-3xl font-bold mb-6">{active?.title}</h1>
-          <p className="text-slate-300 text-sm">{active?.summary}</p>
+          <h1 className="text-6xl sm:text-4xl font-bold mb-4">{active?.title}</h1>
+          <p className="text-slate-300 text-sm sm:text-base">{active?.summary}</p>
         </div>
       </div>
 
@@ -279,8 +279,9 @@ export default function SwipePage() {
         </div>
       </div>
 
-      <div className="absolute bottom-7 w-full text-center text-xs text-slate-500">
-        ← → / mouse / swipe / ↑ bookmark / refresh
+      <div className="absolute bottom-3 w-full text-center text-xs text-slate-500">
+        PC：左右キー・マウスドラッグ・クリックでカード選択 / 上キー・上にドラックでブックマーク<br/>
+        スマホ：タップでカード選択 / 上にスワイプでブックマーク
       </div>
     </main>
   );
