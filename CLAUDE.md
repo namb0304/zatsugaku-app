@@ -1,112 +1,112 @@
-# Claude Code Instructions
+# Claude Code向け指示
 
-## Role
+## 役割
 
-Implement the agreed MVP in small, reviewable steps.
-The project owner makes final product decisions. Do not silently add features or
-change requirements.
+合意済みのMVPを、小さくレビュー可能な単位で実装する。
+プロダクト上の最終判断はプロジェクト責任者が行う。機能を勝手に追加したり、
+要件を黙って変更したりしないこと。
 
-## Source Of Truth
+## 参照する資料
 
-Read these files before implementation:
+実装前に以下を順番に読むこと。
 
 1. `CLAUDE.md`
 2. `docs/Requirements.md`
 3. `docs/Mvp.md`
 4. `docs/Architecture.md`
 5. `docs/GeminiPromptDraft.md`
-6. The nearest directory-specific `CLAUDE.md`
+6. 作業対象に最も近いディレクトリの`CLAUDE.md`
 
-If the documents conflict, follow this file first. Ask before changing product
-behavior that is not covered by the documents.
+資料間に矛盾がある場合は、最初にこのファイルを優先する。
+資料にないプロダクト動作を変更する場合は、実装前に確認すること。
 
-## Fixed MVP Decisions
+## 確定済みのMVP仕様
 
-- The first experience is a trivia card, not a marketing page.
-- Trivia is navigated by horizontal swipe.
-- One feed batch contains about 10 items.
-- A card contains `id`, `title`, `summary`, `genre`, `tags`,
-  `source_title`, and `source_url`.
-- Guests can view trivia without signing in.
-- Signed-in users can bookmark, select genres, and receive personalization.
-- Bookmark means "I want to revisit this / I did not know this".
-- Favorites are not part of the MVP.
-- Guest view history is stored in `localStorage`.
-- Personalization is rule based:
-  - selected genre: +3
-  - bookmarked trivia genre: +2
-  - bookmarked trivia tag: +1
-- Gemini output follows `docs/GeminiPromptDraft.md`.
-- Generated trivia is stored in Supabase.
-- When Gemini fails, return stored or bundled fallback trivia.
-- Deployment is lower priority than a working local MVP.
+- 最初に表示するのは雑学カードであり、紹介用のランディングページではない。
+- 雑学は横スワイプで移動する。
+- 1回のフィードは約10件とする。
+- カードは`id`、`title`、`summary`、`genre`、`tags`、
+  `source_title`、`source_url`を持つ。
+- ゲストはログインせずに雑学を閲覧できる。
+- ログインユーザーはブックマーク、ジャンル選択、パーソナライズを利用できる。
+- ブックマークは「後で見返したい、または知らなかった」という意味で使う。
+- お気に入り機能はMVPに含めない。
+- ゲストの視聴履歴は`localStorage`へ保存する。
+- パーソナライズは以下のルールベースとする。
+  - 選択ジャンル: +3
+  - ブックマークした雑学のジャンル: +2
+  - ブックマークした雑学のタグ: +1
+- Geminiの出力は`docs/GeminiPromptDraft.md`に従う。
+- 生成した雑学はSupabaseへ保存する。
+- Geminiが失敗した場合は、DBまたは同梱した事前データを返す。
+- デプロイより、ローカルで動作するMVPを優先する。
 
-## Technology
+## 技術構成
 
-- Frontend: Next.js 16, TypeScript, React 19, Tailwind CSS 4
-- Backend: FastAPI, Python
-- Database and authentication: Supabase
-- AI: Gemini API through the backend only
+- フロントエンド: Next.js 16、TypeScript、React 19、Tailwind CSS 4
+- バックエンド: FastAPI、Python
+- DB・認証: Supabase
+- AI: Gemini API。必ずバックエンドから呼び出す。
 
-The intended request path is:
+想定する通信経路は以下。
 
 ```text
-Browser -> Next.js -> FastAPI -> Supabase / Gemini
+ブラウザ -> Next.js -> FastAPI -> Supabase / Gemini
 ```
 
-The frontend may call Supabase directly for Supabase Auth. Application data
-should go through FastAPI so API contracts and authorization stay centralized.
+フロントエンドからSupabaseを直接利用してよいのは、Supabase Authによる認証処理。
+アプリケーションデータはFastAPIを経由し、API仕様と認可処理を一元管理する。
 
-## Current State
+## 現在の状態
 
-As of 2026-06-27:
+2026-06-27時点:
 
-- The frontend screens and swipe interactions exist with mock data.
-- FastAPI has not been implemented.
-- Supabase tables, RLS, grants, and one seed trivia row exist remotely.
-- Frontend and backend environment files exist locally and are ignored by Git.
-- Gemini credentials exist, but the current Google project returns
-  `403 PERMISSION_DENIED`. Gemini integration must therefore fail safely and
-  use fallback trivia until Google restores access.
+- フロント画面とスワイプ操作はモックデータで実装済み。
+- FastAPIは未実装。
+- Supabaseのテーブル、RLS、権限設定、事前雑学1件はリモート環境に作成済み。
+- フロント・バックの環境変数ファイルはローカルにあり、Git対象外に設定済み。
+- Geminiの認証情報はあるが、現在のGoogleプロジェクトは
+  `403 PERMISSION_DENIED`を返す。そのため、Google側でアクセスが回復するまでは
+  必ず事前データへ切り替えられる構成にする。
 
-Do not treat the Gemini 403 as an application crash or block all other work.
+Geminiの403をアプリ全体のクラッシュや、他機能の実装を止める理由にしないこと。
 
-## Security Boundaries
+## セキュリティ境界
 
-- Never print, commit, log, or expose values from `.env` or `.env.local`.
-- Never put `SUPABASE_SECRET_KEY` or `GEMINI_API_KEY` in frontend code.
-- Do not accept `user_id` from the client for authenticated operations.
-- Validate the Supabase access token and derive the user ID from it.
-- The Supabase secret key bypasses RLS. Every backend user-data query must
-  explicitly scope by the authenticated user ID.
-- Do not modify the remote database schema without explicit approval.
+- `.env`や`.env.local`の値を表示、コミット、ログ出力、公開しない。
+- `SUPABASE_SECRET_KEY`と`GEMINI_API_KEY`をフロントコードへ置かない。
+- 認証が必要な操作で、クライアントから`user_id`を受け取らない。
+- Supabaseのアクセストークンを検証し、トークンからユーザーIDを取得する。
+- Supabase Secret keyはRLSを回避する。バックエンドでユーザーデータを扱う
+  すべてのクエリを、認証済みユーザーIDで明示的に絞り込む。
+- 明示的な承認なしに、リモートDBの構造を変更しない。
 
-## Implementation Workflow
+## 実装の進め方
 
-For each task:
+各タスクで以下を行うこと。
 
-1. Read the relevant docs and existing code.
-2. Inspect `git status` and preserve unrelated user changes.
-3. State the files and behavior you plan to change.
-4. Implement only one vertical step at a time.
-5. Add focused tests for backend logic and risky frontend behavior.
-6. Run the relevant lint, build, and tests.
-7. Report changed files, commands run, remaining risks, and the next step.
+1. 関連資料と既存コードを読む。
+2. `git status`を確認し、無関係な既存変更を保持する。
+3. 変更予定のファイルと動作を短く説明する。
+4. 一度に1つの縦方向の機能単位だけ実装する。
+5. バックエンドロジックや危険度の高いフロント処理に絞ったテストを追加する。
+6. 関連するlint、build、testを実行する。
+7. 変更ファイル、実行コマンド、残るリスク、次の作業を報告する。
 
-Do not commit, push, deploy, or alter remote Supabase configuration unless the
-user explicitly asks.
+ユーザーから明示的に依頼されない限り、commit、push、デプロイ、
+Supabaseのリモート設定変更を行わない。
 
-## API Conventions
+## APIのルール
 
-- Use JSON responses with typed Pydantic models.
-- Keep API field names in `snake_case`.
-- Return useful HTTP status codes without leaking internal errors or secrets.
-- `GET /health` must not depend on Gemini.
-- External service calls must have timeouts and controlled error handling.
-- Tests must mock Supabase and Gemini; normal test runs must not call live APIs.
-- Trivia IDs are UUID strings, not integers.
+- JSONレスポンスと型付きPydanticモデルを使用する。
+- APIのフィールド名は`snake_case`で統一する。
+- 内部エラーや秘密情報を漏らさず、適切なHTTPステータスを返す。
+- `GET /health`はGeminiの状態に依存させない。
+- 外部サービス呼び出しにはタイムアウトと制御されたエラー処理を設ける。
+- テストではSupabaseとGeminiをモックする。通常のテストから実APIを呼ばない。
+- 雑学IDは整数ではなくUUID文字列として扱う。
 
-Candidate endpoints:
+API候補:
 
 ```text
 GET    /health
@@ -120,28 +120,28 @@ PUT    /me/preferences
 POST   /me/view-history
 ```
 
-## Scope Control
+## スコープ管理
 
-Do not add these unless explicitly requested:
+明示的に依頼されない限り、以下を追加しない。
 
-- favorites
-- social login
-- chat or deep-dive AI chat
-- notifications
-- search
-- admin UI
-- deployment infrastructure
-- a new database schema
-- a new design system or major UI redesign
+- お気に入り
+- ソーシャルログイン
+- AIチャット・深掘りチャット
+- 通知
+- 検索
+- 管理画面
+- デプロイ基盤
+- 新しいDB構造
+- 新しいデザインシステムや大規模なUI変更
 
-Preserve the existing swipe UI and animations while replacing mock behavior.
+モック処理を実データへ置き換える際も、既存のスワイプUIとアニメーションを維持する。
 
-## Definition Of Done
+## 完了条件
 
-A change is not complete until:
+以下を満たすまで変更を完了扱いにしない。
 
-- it satisfies the relevant MVP acceptance criteria;
-- loading, empty, and failure states are handled;
-- secrets stay server-side;
-- tests and lint/build checks pass, or failures are clearly reported;
-- no unrelated files are reformatted or rewritten.
+- 関連するMVPの受け入れ条件を満たしている。
+- 読み込み中、空データ、失敗時の状態を処理している。
+- 秘密情報がサーバー側だけにある。
+- テストとlint/buildが成功している。失敗した場合は内容を明記している。
+- 無関係なファイルを整形・書き換えていない。

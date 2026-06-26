@@ -1,10 +1,10 @@
-# Backend Instructions
+# バックエンド向け指示
 
-The root `CLAUDE.md` and project docs are authoritative.
+ルートの`CLAUDE.md`とプロジェクト資料を正式な仕様として扱う。
 
-## Suggested Structure
+## 推奨構成
 
-Keep responsibilities separated without introducing unnecessary abstraction:
+不要な抽象化を増やさず、責務を以下のように分ける。
 
 ```text
 backend/
@@ -22,57 +22,55 @@ backend/
 └── requirements.txt
 ```
 
-Adjust this only when the implemented code clearly benefits from a smaller
-structure.
+実装規模が小さく、明らかに簡潔になる場合のみ、より小さい構成へ調整してよい。
 
-## Configuration
+## 設定
 
-- Load configuration through a typed settings object.
-- Required environment variables:
+- 型付きの設定オブジェクトから環境変数を読み込む。
+- 必須の環境変数:
   - `SUPABASE_URL`
   - `SUPABASE_SECRET_KEY`
   - `GEMINI_API_KEY`
   - `FRONTEND_ORIGIN`
-- Add `GEMINI_MODEL` only when Gemini integration is implemented, with a safe
-  documented default.
-- Do not read environment variables throughout business logic.
+- `GEMINI_MODEL`はGemini接続を実装する段階で追加し、安全な初期値を文書化する。
+- ビジネスロジックの各所で直接環境変数を読まない。
 
-## Boundaries
+## 責務の分離
 
-- Routers handle HTTP validation and response mapping.
-- Services implement feed, personalization, and generation behavior.
-- Repositories contain Supabase queries.
-- Pydantic models define external and internal data contracts.
-- Centralize the list of 10 allowed genres.
+- RouterはHTTP入力の検証とレスポンス変換を担当する。
+- Serviceはフィード、パーソナライズ、生成処理を担当する。
+- RepositoryはSupabaseへのクエリを担当する。
+- Pydanticモデルで外部・内部のデータ仕様を定義する。
+- 許可する10ジャンルの一覧を一か所に集約する。
 
-## Authentication
+## 認証
 
-- Public feed endpoints may work without a user token.
-- Bookmark and preference endpoints require a valid Supabase access token.
-- Validate the token with Supabase Auth and derive the user ID from it.
-- Never trust a client-provided `user_id`.
-- Even when using the secret key, filter all user-owned rows by that user ID.
+- 公開フィードはユーザートークンなしでも利用できる。
+- ブックマークとジャンル設定には有効なSupabaseアクセストークンが必要。
+- Supabase Authでトークンを検証し、ユーザーIDを取得する。
+- クライアントから渡された`user_id`を信用しない。
+- Secret keyを使用する場合でも、ユーザー所有データを必ずユーザーIDで絞り込む。
 
 ## Gemini
 
-- Use the maintained Google Gen AI SDK, not a deprecated Gemini package.
-- Keep Gemini behind a service interface so tests can replace it.
-- Validate generated JSON with Pydantic before writing to Supabase.
-- Require exactly 10 valid items for a successful generation batch.
-- Persist only columns that exist in the `trivia` table.
-- `confidence_note` may be accepted from Gemini but is not currently persisted.
-- Treat timeout, malformed JSON, invalid URL, wrong genre, wrong item count,
-  rate limit, and permission errors as controlled generation failures.
-- On generation failure, return existing DB trivia or bundled fallback data.
+- 非推奨のGeminiパッケージではなく、現在保守されているGoogle Gen AI SDKを使用する。
+- Gemini処理を独立したServiceにし、テストで差し替えられるようにする。
+- 生成されたJSONをPydanticで検証してからSupabaseへ書き込む。
+- 正常な生成結果は必ず10件とする。
+- `trivia`テーブルに存在する列だけを保存する。
+- `confidence_note`は受け取ってもよいが、現在のDBには保存しない。
+- タイムアウト、不正JSON、不正URL、対象外ジャンル、件数違い、
+  レート制限、権限エラーを制御された生成失敗として扱う。
+- 生成失敗時は、DB内の既存雑学または同梱した事前データを返す。
 
-## Tests
+## テスト
 
-- Use `pytest`.
-- Mock Supabase and Gemini in unit/API tests.
-- Include success, unauthorized, empty-data, and external-failure cases.
-- Never require live credentials for normal tests.
+- `pytest`を使用する。
+- 単体テストとAPIテストではSupabaseとGeminiをモックする。
+- 正常系、未認証、空データ、外部サービス失敗を確認する。
+- 通常のテストに実際の認証情報を要求しない。
 
-Run before handoff:
+作業完了前に以下を実行する。
 
 ```bash
 pytest
