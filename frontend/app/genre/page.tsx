@@ -5,37 +5,10 @@
 // 接続: 「はじめる」押下時に /swipe へ遷移（選択ジャンルをクエリや Context で渡す）
 // TODO: ログインユーザーの場合は GET /me/preferences で取得して初期選択状態にする
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-
-const GENRES = [
-  "自然・科学・宇宙",
-  "生き物",
-  "人体・医学",
-  "歴史・偉人",
-  "言葉・語源",
-  "食べ物・料理",
-  "地理・世界の文化",
-  "生活・日常の疑問",
-  "エンタメ・芸術・スポーツ",
-  "サブカル・マニアック",
-];
+import { useGenre } from "@/hooks/useGenre";
 
 export default function GenrePage() {
-  const router = useRouter();
-  const [selected, setSelected] = useState<string[]>([]);
-
-  const toggle = (genre: string) => {
-    setSelected((prev) =>
-      prev.includes(genre) ? prev.filter((g) => g !== genre) : [...prev, genre]
-    );
-  };
-
-  const handleStart = () => {
-    // TODO: ログインユーザーなら PUT /me/preferences で保存
-    localStorage.setItem("selectedGenres", JSON.stringify(selected));
-    router.push("/swipe");
-  };
+  const { GENRES, selected, toggle, start } = useGenre();
 
   return (
     <main className="flex min-h-screen flex-col items-center bg-white px-6 py-12">
@@ -45,6 +18,7 @@ export default function GenrePage() {
       <div className="w-full max-w-sm flex flex-col gap-3 mb-10">
         {GENRES.map((genre) => {
           const isSelected = selected.includes(genre);
+
           return (
             <button
               key={genre}
@@ -62,7 +36,7 @@ export default function GenrePage() {
       </div>
 
       <button
-        onClick={handleStart}
+        onClick={start}
         className="w-full max-w-sm rounded-lg bg-black py-3 text-center text-sm font-medium text-white"
       >
         はじめる{selected.length > 0 ? `（${selected.length}件選択中）` : ""}

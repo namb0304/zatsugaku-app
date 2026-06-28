@@ -5,52 +5,42 @@
 //   - 失敗 → エラーメッセージ表示
 // 接続: 既にセッションがある場合は /genre へリダイレクト（middleware.ts で対応予定）
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
+import { useGenre } from "@/hooks/useGenre";
 
-export default function LoginPage() {
-  const router = useRouter();
-  const [email, setEmail]       = useState("");
-  const [password, setPassword] = useState("");
-
-  const handleLogin = () => {
-    // TODO: Supabase Auth の signInWithPassword({ email, password }) に差し替える
-    router.push("/genre");
-  };
+export default function GenrePage() {
+  const { GENRES, selected, toggle, start } = useGenre();
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center bg-white px-6">
-      <h1 className="text-2xl font-bold mb-2">ログイン</h1>
-      <p className="text-sm text-gray-500 mb-8">雑学アプリへようこそ</p>
+    <main className="flex min-h-screen flex-col items-center bg-white px-6 py-12">
+      <h1 className="text-xl font-bold mb-2">好きなジャンルを選ぼう</h1>
+      <p className="text-sm text-gray-500 mb-8">複数選択できます</p>
 
-      <div className="w-full max-w-sm flex flex-col gap-4">
-        {/* TODO: value を Supabase Auth に渡す */}
-        <input
-          type="email"
-          placeholder="メールアドレス"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-black"
-        />
-        <input
-          type="password"
-          placeholder="パスワード"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm outline-none focus:border-black"
-        />
-        <button
-          onClick={handleLogin}
-          className="w-full rounded-lg bg-black py-3 text-center text-sm font-medium text-white"
-        >
-          ログイン
-        </button>
-        {/* ログインせずに続ける: 認証不要。/genre へそのまま遷移 */}
-        <Link href="/genre" className="text-center text-sm text-gray-500 underline">
-          ログインせずに続ける
-        </Link>
+      <div className="w-full max-w-sm flex flex-col gap-3 mb-10">
+        {GENRES.map((genre) => {
+          const isSelected = selected.includes(genre);
+
+          return (
+            <button
+              key={genre}
+              onClick={() => toggle(genre)}
+              className={`w-full rounded-lg border px-4 py-3 text-left text-sm transition-colors ${
+                isSelected
+                  ? "border-black bg-black text-white"
+                  : "border-gray-300 bg-white text-gray-800 hover:border-gray-500"
+              }`}
+            >
+              {isSelected ? "✓ " : ""}{genre}
+            </button>
+          );
+        })}
       </div>
+
+      <button
+        onClick={start}
+        className="w-full max-w-sm rounded-lg bg-black py-3 text-center text-sm font-medium text-white"
+      >
+        はじめる{selected.length > 0 ? `（${selected.length}件選択中）` : ""}
+      </button>
     </main>
   );
 }
