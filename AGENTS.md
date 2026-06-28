@@ -1,4 +1,4 @@
-# Claude Code向け指示
+# Codex向け指示
 
 ## 役割
 
@@ -10,12 +10,12 @@
 
 実装前に以下を順番に読むこと。
 
-1. `CLAUDE.md`
+1. `AGENTS.md`
 2. `docs/Requirements.md`
 3. `docs/Mvp.md`
 4. `docs/Architecture.md`
 5. `docs/GeminiPromptDraft.md`
-6. 作業対象に最も近いディレクトリの`CLAUDE.md`
+6. 作業対象に最も近いディレクトリの`AGENTS.md`
 
 資料間に矛盾がある場合は、最初にこのファイルを優先する。
 資料にないプロダクト動作を変更する場合は、実装前に確認すること。
@@ -59,12 +59,11 @@
 
 ## 現在の状態
 
-2026-06-29時点:
+2026-06-27時点:
 
 - フロント画面とスワイプ操作はモックデータで実装済み。
-- FastAPIの起動構成、CORS、`GET /health`、基本テストは実装済み。
+- FastAPIは未実装。
 - Supabaseのテーブル、RLS、権限設定、事前雑学1件はリモート環境に作成済み。
-- FastAPIからSupabaseへの接続とフィードAPIは未実装。
 - フロント・バックの環境変数ファイルはローカルにあり、Git対象外に設定済み。
 - Geminiの認証情報はあるが、現在のGoogleプロジェクトは
   `403 PERMISSION_DENIED`を返す。そのため、Google側でアクセスが回復するまでは

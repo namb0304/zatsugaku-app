@@ -56,6 +56,7 @@ Supabaseに保存された雑学を返すフィードAPIを実装してくださ
 - source_title、source_url、genre、tagsを必ず含める
 - DBが空、タイムアウト、接続失敗の場合はbundled fallbackデータを返す
 - fallbackデータは10件用意し、10ジャンルとカード形式に一致させる
+- DBの取得結果が10件未満の場合は、IDを重複させずfallbackデータで10件まで補う
 - 外部通信はタイムアウトを持つ
 - SupabaseをモックしたAPIテストを追加する
 

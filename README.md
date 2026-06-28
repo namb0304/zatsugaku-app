@@ -9,10 +9,10 @@
 | 領域 | 採用技術 |
 |---|---|
 | フロントエンド | Next.js 16 + TypeScript + Tailwind CSS v4 |
-| バックエンド | FastAPI（未実装） |
-| DB | Supabase PostgreSQL（未実装） |
-| 認証 | Supabase Auth（未実装） |
-| AI | Gemini API（未実装） |
+| バックエンド | FastAPI（基盤・ヘルスチェック実装済み） |
+| DB | Supabase PostgreSQL（環境構築済み・API連携前） |
+| 認証 | Supabase Auth（環境構築済み・画面連携前） |
+| AI | Gemini API（連携前） |
 
 ---
 
@@ -20,6 +20,7 @@
 
 ```
 zatsugaku-app/
+├── backend/            # FastAPI バックエンド
 ├── docs/               # 要件定義・設計ドキュメント
 │   ├── Requirements.md
 │   ├── Architecture.md
@@ -60,6 +61,8 @@ zatsugaku-app/
 
 ## ローカル起動
 
+### フロントエンド
+
 ```bash
 cd frontend
 npm install
@@ -67,6 +70,25 @@ npm run dev
 ```
 
 → http://localhost:3000 で起動
+
+### バックエンド
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
+
+→ http://localhost:8000/health で`{"status":"ok"}`を確認
+
+テスト:
+
+```bash
+cd backend
+.venv/bin/pytest
+```
 
 ---
 
