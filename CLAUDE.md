@@ -64,7 +64,9 @@
 - フロント画面とスワイプ操作はモックデータで実装済み。
 - FastAPIの起動構成、CORS、`GET /health`、基本テストは実装済み。
 - Supabaseのテーブル、RLS、権限設定、事前雑学1件はリモート環境に作成済み。
-- FastAPIからSupabaseへの接続とフィードAPIは未実装。
+- FastAPIからSupabaseへの接続、`GET /trivia/feed`、10件未満の場合の
+  事前データ補填は実装済み。
+- フロントエンドからフィードAPIへの接続は未実装。
 - フロント・バックの環境変数ファイルはローカルにあり、Git対象外に設定済み。
 - Geminiの認証情報はあるが、現在のGoogleプロジェクトは
   `403 PERMISSION_DENIED`を返す。そのため、Google側でアクセスが回復するまでは
