@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 const SPREAD_DEG = 7;
 const DRAG_THRESHOLD = 30;
@@ -89,8 +89,6 @@ export const useSwipePage = (total: number) => {
   const getCardStyle = (i: number) => {
     const angle = (i - activeIndex) * SPREAD_DEG;
     const isActive = i === activeIndex;
-    const origin = "50% 480%";
-
     if (bookmarkFlyIdx === i) {
       return {
         transform: "rotate(0deg) translateY(-280px)",

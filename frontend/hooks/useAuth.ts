@@ -17,8 +17,8 @@ export const useAuth = () => {
       await authService.signIn(email, password);
 
       router.push("/genre");
-    } catch (e: any) {
-      setError(e.message ?? "ログインに失敗しました");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "ログインに失敗しました");
     } finally {
       setLoading(false);
     }

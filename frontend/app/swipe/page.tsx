@@ -1,73 +1,64 @@
 "use client";
 
-// =====================================================================
-// スワイプ画面 (/swipe)
-// =====================================================================
-//
-// 【データ取得】
-//   接続: GET /trivia/feed でカード10件を取得（クエリ: selectedGenres）
-//   接続: 10枚使い切ったら POST /trivia/generate で次の10件を生成 → dealNewCards() を呼ぶ
-//   接続: 生成失敗時は public/fallback.json 等の事前データを表示
-//
-// 【スワイプ操作】（画面全体で検知）
-//   右スワイプ / → キー → 次のカードへ進む（goLeft: activeIndex を増やす）
-//   左スワイプ / ← キー → 前のカードへ戻る（goRight: activeIndex を減らす）
-//   上スワイプ / ↑ キー → ブックマーク保存（addBookmark → POST /bookmarks）
-//   カードタップ    → そのカードを選択
-//
-// 【ブックマーク】
-//   接続: POST /bookmarks に { trivia_id } を送信
-//   未ログイン時 → ログイン誘導モーダルを表示（TODO）
-//
-// 【視聴履歴】
-//   接続（ログインユーザー）: Supabase の viewed_history テーブルに記録（TODO）
-//   接続（未ログイン）: localStorage に trivia_id を保存して再表示を防ぐ（TODO）
-//
-// 【ドロー演出】
-//   10枚使い切り → dealNewCards() が全カードを一瞬重ねてからファンアウト
-//   "stacked" → "fanning" → "idle" の3フェーズで管理
-// =====================================================================
-
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-
-const generateMockTrivia = () =>
-  Array.from({ length: 10 }).map((_, i) => ({
-    id: Date.now() + i,
-    title: `雑学タイトル ${i + 1}`,
-    summary: `これは新しく生成された雑学${i + 1}です。`,
-  }));
+import { fetchTriviaFeed } from "@/lib/api";
+import {
+  getViewedIds,
+  markViewed,
+  prioritizeUnviewed,
+} from "@/lib/viewHistory";
+import type { TriviaItem } from "@/types/trivia";
 
 const CENTER = 4.5;
+type FeedStatus = "loading" | "error" | "empty" | "ok";
 
 export default function SwipePage() {
-  const [cards, setCards] = useState(generateMockTrivia);
+  // ── データ ──────────────────────────────────────────────────────────
+  const [cards, setCards] = useState<TriviaItem[]>([]);
+  // "loading" を初期値にして、エフェクト内で同期 setState しない
+  const [feedStatus, setFeedStatus] = useState<FeedStatus>("loading");
+  const [retryCount, setRetryCount] = useState(0);
+
+  // ── UI 状態 ──────────────────────────────────────────────────────────
   const [activeIndex, setActiveIndex] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef<(HTMLButtonElement | null)[]>([]);
-
   const pointer = useRef<{ x: number; y: number } | null>(null);
-  const isDragging = useRef(false);
+
+  // ── フィード取得（retryCount が変わるたびに再実行） ─────────────────
+  useEffect(() => {
+    let cancelled = false;
+
+    fetchTriviaFeed()
+      .then((items) => {
+        if (cancelled) return;
+        setCards(prioritizeUnviewed(items, getViewedIds()));
+        setActiveIndex(0);
+        setFeedStatus(items.length > 0 ? "ok" : "empty");
+      })
+      .catch(() => {
+        if (!cancelled) setFeedStatus("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [retryCount]);
 
   const total = cards.length;
   const active = cards[activeIndex];
 
-  // =========================
-  // 更新
-  // =========================
-  const refreshCards = useCallback(() => {
-    setCards(generateMockTrivia());
-    setActiveIndex(0);
-    setToast("カードを更新しました");
-    setTimeout(() => setToast(null), 1500);
-  }, []);
+  // ── 視聴履歴（ゲスト） ───────────────────────────────────────────────
+  useEffect(() => {
+    if (active) markViewed(active.id);
+  }, [active]);
 
-  // =========================
-  // ナビ
-  // =========================
+  // ── ナビ ─────────────────────────────────────────────────────────────
   const next = useCallback(() => {
+    if (total === 0) return;
     setActiveIndex((i) => Math.min(i + 1, total - 1));
   }, [total]);
 
@@ -75,101 +66,66 @@ export default function SwipePage() {
     setActiveIndex((i) => Math.max(i - 1, 0));
   }, []);
 
-  // =========================
-  // ブックマーク
-  // =========================
+  // ── ブックマーク（Phase 6 で実接続） ─────────────────────────────────
   const addBookmark = useCallback(() => {
-    const item = cards[activeIndex];
-    console.log("bookmark:", item.id);
-
     setToast("ブックマークしました");
     setTimeout(() => setToast(null), 1500);
-  }, [activeIndex, cards]);
+  }, []);
 
-  // =========================
-  // Pointer（スマホ/PC統一）
-  // =========================
-  const onPointerDown = (e: React.PointerEvent) => {
-    pointer.current = { x: e.clientX, y: e.clientY };
-    isDragging.current = false;
+  // ── 再取得（イベントハンドラから呼ぶので setState OK） ──────────────
+  const refreshCards = () => {
+    setFeedStatus("loading");
+    setRetryCount((n) => n + 1);
   };
 
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!pointer.current) return;
-
-    const dx = e.clientX - pointer.current.x;
-    const dy = e.clientY - pointer.current.y;
-
-    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
-      isDragging.current = true;
-    }
+  // ── ポインター ────────────────────────────────────────────────────────
+  const onPointerDown = (e: React.PointerEvent) => {
+    pointer.current = { x: e.clientX, y: e.clientY };
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
     if (!pointer.current) return;
-
     const dx = e.clientX - pointer.current.x;
     const dy = e.clientY - pointer.current.y;
-
     pointer.current = null;
 
-    // 上スワイプ → ブックマーク
     if (dy < -60 && Math.abs(dy) > Math.abs(dx)) {
       addBookmark();
       return;
     }
-
-    // 左右スワイプ
     if (Math.abs(dx) > Math.abs(dy)) {
       if (dx < -40) next();
       if (dx > 40) prev();
-      return;
-    }
-
-    // タップ（ドラッグしてない時だけ）
-    if (!isDragging.current) {
-      setActiveIndex(activeIndex);
     }
   };
 
-  // =========================
-  // キー操作
-  // =========================
+  // ── キーボード ────────────────────────────────────────────────────────
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "ArrowRight") next();
       if (e.key === "ArrowLeft") prev();
       if (e.key === "ArrowUp") addBookmark();
     };
-
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [next, prev, addBookmark]);
 
-  // =========================
-  // カーソル選択
-  // =========================
+  // ── マウスホバーでカード選択 ───────────────────────────────────────────
   const onMouseMove = (e: React.MouseEvent) => {
-    const x = e.clientX;
-    const y = e.clientY;
-
+    const { clientX: x, clientY: y } = e;
     let hitIndex = -1;
     let hitZ = -Infinity;
 
     cardRefs.current.forEach((el, i) => {
       if (!el) return;
-
       const rect = el.getBoundingClientRect();
-
-      const inside =
+      if (
         x >= rect.left &&
         x <= rect.right &&
         y >= rect.top &&
-        y <= rect.bottom;
-
-      if (inside) {
+        y <= rect.bottom
+      ) {
         const z = Number(el.dataset.z ?? "0");
-
         if (z > hitZ) {
           hitZ = z;
           hitIndex = i;
@@ -177,17 +133,46 @@ export default function SwipePage() {
       }
     });
 
-    if (hitIndex !== -1) {
-      setActiveIndex(hitIndex);
-    }
+    if (hitIndex !== -1) setActiveIndex(hitIndex);
   };
 
+  // ── ローディング ───────────────────────────────────────────────────────
+  if (feedStatus === "loading") {
+    return (
+      <main className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 text-white flex items-center justify-center">
+        <p className="text-slate-400 text-sm animate-pulse">読み込み中…</p>
+      </main>
+    );
+  }
+
+  // ── エラー / 空 ────────────────────────────────────────────────────────
+  if (feedStatus === "error" || feedStatus === "empty" || total === 0) {
+    const message =
+      feedStatus === "empty"
+        ? "表示できる雑学がありません"
+        : "雑学の読み込みに失敗しました";
+    return (
+      <main className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 text-white flex flex-col items-center justify-center gap-4">
+        <p className="text-slate-300 text-sm">{message}</p>
+        <button
+          onClick={refreshCards}
+          className="bg-white/10 hover:bg-white/20 text-white text-sm px-5 py-2 rounded-lg border border-white/20"
+        >
+          再試行
+        </button>
+      </main>
+    );
+  }
+
+  // ── メイン ─────────────────────────────────────────────────────────────
   return (
     <main
-      className="relative min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 text-white overflow-hidden"
+      className="relative min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 text-white overflow-hidden touch-none select-none"
       onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onPointerCancel={() => {
+        pointer.current = null;
+      }}
     >
       {/* トースト */}
       {toast && (
@@ -201,7 +186,6 @@ export default function SwipePage() {
         <Link href="/mypage" className="text-xs text-slate-300">
           マイページ
         </Link>
-
         <button
           onClick={refreshCards}
           className="bg-white/10 hover:bg-white/20 text-white text-xs px-3 py-2 rounded-lg border border-white/20"
@@ -210,11 +194,37 @@ export default function SwipePage() {
         </button>
       </div>
 
-      {/* 背景 */}
+      {/* 背景コンテンツ */}
       <div className="absolute inset-0 flex items-start justify-center px-8 pt-35">
         <div className="text-center max-w-xl">
-          <h1 className="text-6xl sm:text-4xl font-bold mb-4">{active?.title}</h1>
-          <p className="text-slate-300 text-sm sm:text-base">{active?.summary}</p>
+          <div className="mb-4 flex flex-wrap items-center justify-center gap-2">
+            <span className="rounded-full bg-blue-400/10 px-2.5 py-1 text-xs font-medium text-blue-300">
+              {active.genre}
+            </span>
+            {active.tags.slice(0, 3).map((tag) => (
+              <span
+                key={tag}
+                className="rounded-full border border-white/10 px-2.5 py-1 text-xs text-slate-400"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+          <h1 className="text-6xl sm:text-4xl font-bold mb-4">
+            {active.title}
+          </h1>
+          <p className="text-slate-300 text-sm sm:text-base">{active.summary}</p>
+          {/* 情報源リンク */}
+          <a
+            href={active.source_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-slate-500 hover:text-slate-300 underline mt-3 inline-block"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            出典: {active.source_title}
+          </a>
         </div>
       </div>
 
@@ -225,7 +235,7 @@ export default function SwipePage() {
         </span>
       </div>
 
-      {/* カード */}
+      {/* カード fan（既存レイアウト維持） */}
       <div
         ref={containerRef}
         className="absolute bottom-24 left-0 right-0 flex justify-center"
@@ -235,14 +245,11 @@ export default function SwipePage() {
           {cards.map((card, i) => {
             const offset = i - CENTER;
             const abs = Math.abs(offset);
-
             const isActive = i === activeIndex;
-
             const spacing = 44;
             const x = offset * spacing;
             const y = Math.pow(abs, 1.5) * 3;
             const rotate = offset * 6;
-
             const scale = isActive ? 1.25 : 1;
             const zIndex = total - i;
 
@@ -280,7 +287,8 @@ export default function SwipePage() {
       </div>
 
       <div className="absolute bottom-3 w-full text-center text-xs text-slate-500">
-        PC：左右キー・マウスドラッグ・クリックでカード選択 / 上キー・上にドラックでブックマーク<br/>
+        PC：左右キー・マウスドラッグ・クリックでカード選択 / 上キー・上にドラッグでブックマーク
+        <br />
         スマホ：タップでカード選択 / 上にスワイプでブックマーク
       </div>
     </main>

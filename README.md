@@ -119,7 +119,7 @@ cd backend
 ### 未実装（バックエンド連携待ち）
 
 - [ ] Supabase Auth による認証（現在は画面遷移のみ）
-- [ ] `GET /trivia/feed` へのフロント接続（APIは実装済み、画面はモックデータ）
+- [x] `GET /trivia/feed` へのフロント接続
 - [ ] `POST /trivia/generate` による雑学生成
 - [ ] `POST /bookmarks` / `GET /bookmarks` / `DELETE /bookmarks/:id`
 - [ ] `GET /me/preferences` / `PUT /me/preferences`
