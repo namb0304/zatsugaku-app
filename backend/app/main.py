@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import health, trivia
+from app.routers import bookmarks, health, me, trivia
 
 app = FastAPI(title="Trivia API")
 
@@ -16,3 +16,5 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(trivia.router)
+app.include_router(bookmarks.router)
+app.include_router(me.router)

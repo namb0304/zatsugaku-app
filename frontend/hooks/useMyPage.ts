@@ -23,20 +23,33 @@ export const useMyPage = () => {
 
   const [userEmail, setUserEmail] = useState<string>("");
   const [selected, setSelected] = useState<string[]>([]);
+  const [savingGenres, setSavingGenres] = useState(false);
 
-  // 初期ロード
   useEffect(() => {
     const init = async () => {
       const user = await authService.getUser();
-      if (user?.email) setUserEmail(user.email);
+      if (!user?.email) {
+        router.replace("/login");
+        return;
+      }
+      setUserEmail(user.email);
 
-      // まずlocal（暫定）
-      const local = genreService.getLocal();
-      setSelected(local);
+      const token = await authService.getAccessToken();
+      if (token) {
+        try {
+          const remote = await genreService.getRemote(token);
+          setSelected(remote);
+          genreService.saveLocal(remote);
+          return;
+        } catch {
+          // API失敗時はlocalStorageの値を使う
+        }
+      }
+      setSelected(genreService.getLocal());
     };
 
     init();
-  }, []);
+  }, [router]);
 
   const toggle = async (genre: string) => {
     const next = selected.includes(genre)
@@ -44,11 +57,18 @@ export const useMyPage = () => {
       : [...selected, genre];
 
     setSelected(next);
-
-    // local保存（現状）
     genreService.saveLocal(next);
 
-    // TODO: ログイン時は genreService.saveRemote(next)
+    const token = await authService.getAccessToken();
+    if (!token) return;
+    setSavingGenres(true);
+    try {
+      await genreService.saveRemote(next, token);
+    } catch {
+      // 保存失敗してもUIは維持する
+    } finally {
+      setSavingGenres(false);
+    }
   };
 
   const logout = async () => {
@@ -60,6 +80,7 @@ export const useMyPage = () => {
     GENRES,
     userEmail,
     selected,
+    savingGenres,
     toggle,
     logout,
   };

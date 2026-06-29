@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { fetchTriviaFeed } from "@/lib/api";
+import { addBookmark, fetchTriviaFeed, postViewHistory } from "@/lib/api";
+import { authService } from "@/services/authService";
 import {
   getViewedIds,
   markViewed,
@@ -27,6 +28,7 @@ export default function SwipePage() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const pointer = useRef<{ x: number; y: number } | null>(null);
+  const activeRef = useRef<TriviaItem | undefined>(undefined);
 
   // ── フィード取得（retryCount が変わるたびに再実行） ─────────────────
   useEffect(() => {
@@ -51,9 +53,22 @@ export default function SwipePage() {
   const total = cards.length;
   const active = cards[activeIndex];
 
-  // ── 視聴履歴（ゲスト） ───────────────────────────────────────────────
+  // activeRef を常に最新に保つ（handleBookmark の stale closure を防ぐ）
   useEffect(() => {
-    if (active) markViewed(active.id);
+    activeRef.current = active;
+  }, [active]);
+
+  // ── 視聴履歴（ゲスト: localStorage / ログイン: API） ─────────────────
+  useEffect(() => {
+    if (!active) return;
+
+    authService.getAccessToken().then((token) => {
+      if (token) {
+        postViewHistory(active.id, token).catch(() => {});
+      } else {
+        markViewed(active.id);
+      }
+    });
   }, [active]);
 
   // ── ナビ ─────────────────────────────────────────────────────────────
@@ -66,10 +81,25 @@ export default function SwipePage() {
     setActiveIndex((i) => Math.max(i - 1, 0));
   }, []);
 
-  // ── ブックマーク（Phase 6 で実接続） ─────────────────────────────────
-  const addBookmark = useCallback(() => {
-    setToast("ブックマークしました");
-    setTimeout(() => setToast(null), 1500);
+  // ── ブックマーク ─────────────────────────────────────────────────────
+  const handleBookmark = useCallback(async () => {
+    const item = activeRef.current;
+    if (!item) return;
+
+    const token = await authService.getAccessToken();
+    if (!token) {
+      setToast("ブックマークするにはログインが必要です");
+      setTimeout(() => setToast(null), 2500);
+      return;
+    }
+
+    try {
+      await addBookmark(item.id, token);
+      setToast("ブックマークしました");
+    } catch {
+      setToast("ブックマークに失敗しました");
+    }
+    setTimeout(() => setToast(null), 2000);
   }, []);
 
   // ── 再取得（イベントハンドラから呼ぶので setState OK） ──────────────
@@ -90,7 +120,7 @@ export default function SwipePage() {
     pointer.current = null;
 
     if (dy < -60 && Math.abs(dy) > Math.abs(dx)) {
-      addBookmark();
+      handleBookmark();
       return;
     }
     if (Math.abs(dx) > Math.abs(dy)) {
@@ -104,11 +134,11 @@ export default function SwipePage() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "ArrowRight") next();
       if (e.key === "ArrowLeft") prev();
-      if (e.key === "ArrowUp") addBookmark();
+      if (e.key === "ArrowUp") handleBookmark();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [next, prev, addBookmark]);
+  }, [next, prev, handleBookmark]);
 
   // ── マウスホバーでカード選択 ───────────────────────────────────────────
   const onMouseMove = (e: React.MouseEvent) => {

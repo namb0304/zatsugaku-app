@@ -1,7 +1,17 @@
 export const genreService = {
   getLocal: (): string[] => {
     if (typeof window === "undefined") return [];
-    return JSON.parse(localStorage.getItem("selectedGenres") || "[]");
+    try {
+      const value: unknown = JSON.parse(
+        localStorage.getItem("selectedGenres") || "[]",
+      );
+      return Array.isArray(value) &&
+        value.every((genre) => typeof genre === "string")
+        ? value
+        : [];
+    } catch {
+      return [];
+    }
   },
 
   saveLocal: (genres: string[]) => {
@@ -9,19 +19,13 @@ export const genreService = {
     localStorage.setItem("selectedGenres", JSON.stringify(genres));
   },
 
-  getRemote: async (): Promise<string[]> => {
-    const res = await fetch("/me/preferences");
-    if (!res.ok) return [];
-    return res.json();
+  getRemote: async (accessToken: string): Promise<string[]> => {
+    const { fetchPreferences } = await import("@/lib/api");
+    return fetchPreferences(accessToken);
   },
 
-  saveRemote: async (genres: string[]) => {
-    const res = await fetch("/me/preferences", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ genres }),
-    });
-
-    if (!res.ok) throw new Error("failed to save genres");
+  saveRemote: async (genres: string[], accessToken: string): Promise<void> => {
+    const { savePreferences } = await import("@/lib/api");
+    return savePreferences(genres, accessToken);
   },
 };

@@ -1,37 +1,78 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { bookmarkService, Bookmark } from "@/services/bookmarkService";
+import { fetchBookmarks, removeBookmark as apiRemoveBookmark } from "@/lib/api";
+import { authService } from "@/services/authService";
+
+export type BookmarkTrivia = {
+  id: string;
+  title: string;
+  summary: string;
+  genre: string;
+  source_title: string;
+  source_url: string;
+};
+
+export type BookmarkItem = {
+  id: string;
+  trivia: BookmarkTrivia;
+  created_at: string;
+};
+
+type BookmarkStatus = "loading" | "unauthenticated" | "error" | "ok";
 
 export const useBookmarks = () => {
-  const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [bookmarks, setBookmarks] = useState<BookmarkItem[]>([]);
+  // "loading" を初期値にしてエフェクト内の同期 setState を避ける
+  const [status, setStatus] = useState<BookmarkStatus>("loading");
+  const [retryCount, setRetryCount] = useState(0);
 
-  const fetchBookmarks = async () => {
+  useEffect(() => {
+    let cancelled = false;
+
+    authService.getAccessToken().then((token) => {
+      if (cancelled) return;
+      if (!token) {
+        setStatus("unauthenticated");
+        return;
+      }
+      fetchBookmarks(token)
+        .then((items) => {
+          if (cancelled) return;
+          setBookmarks(items);
+          setStatus("ok");
+        })
+        .catch(() => {
+          if (!cancelled) setStatus("error");
+        });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [retryCount]);
+
+  const removeBookmark = async (triviaId: string) => {
+    const token = await authService.getAccessToken();
+    if (!token) return;
     try {
-      setLoading(true);
-      const data = await bookmarkService.getAll();
-      setBookmarks(data);
-    } finally {
-      setLoading(false);
+      await apiRemoveBookmark(triviaId, token);
+      setBookmarks((prev) => prev.filter((b) => b.trivia.id !== triviaId));
+    } catch {
+      setStatus("error");
     }
   };
 
-  const removeBookmark = async (trivia_id: number) => {
-    await bookmarkService.delete(trivia_id);
-    setBookmarks((prev) =>
-      prev.filter((b) => b.trivia.id !== trivia_id)
-    );
+  const refetch = () => {
+    setStatus("loading");
+    setRetryCount((n) => n + 1);
   };
-
-  useEffect(() => {
-    fetchBookmarks();
-  }, []);
 
   return {
     bookmarks,
-    loading,
+    loading: status === "loading",
+    status,
     removeBookmark,
-    refetch: fetchBookmarks,
+    refetch,
   };
 };
