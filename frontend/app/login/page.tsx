@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { authService } from "@/services/authService";
 
@@ -9,6 +9,13 @@ type Mode = "login" | "signup";
 export default function LoginPage() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("login");
+
+  // ログイン済みの場合はスワイプ画面へ転送
+  useEffect(() => {
+    authService.getAccessToken().then((token) => {
+      if (token) router.replace("/swipe");
+    });
+  }, [router]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -23,7 +30,7 @@ export default function LoginPage() {
     try {
       if (mode === "login") {
         await authService.signIn(email, password);
-        router.replace("/genre");
+        router.replace("/swipe");
       } else {
         const data = await authService.signUp(email, password);
         if (data.session) {

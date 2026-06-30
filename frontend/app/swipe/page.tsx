@@ -9,6 +9,7 @@ import {
   markViewed,
   prioritizeUnviewed,
 } from "@/lib/viewHistory";
+import { shuffle } from "@/lib/swipeUtils";
 import type { TriviaItem } from "@/types/trivia";
 
 const CENTER = 4.5;
@@ -17,9 +18,10 @@ type FeedStatus = "loading" | "error" | "empty" | "ok";
 export default function SwipePage() {
   // ── データ ──────────────────────────────────────────────────────────
   const [cards, setCards] = useState<TriviaItem[]>([]);
-  // "loading" を初期値にして、エフェクト内で同期 setState しない
   const [feedStatus, setFeedStatus] = useState<FeedStatus>("loading");
   const [retryCount, setRetryCount] = useState(0);
+  const [fetchingNext, setFetchingNext] = useState(false);
+  const [nextError, setNextError] = useState(false);
 
   // ── UI 状態 ──────────────────────────────────────────────────────────
   const [activeIndex, setActiveIndex] = useState(0);
@@ -30,6 +32,12 @@ export default function SwipePage() {
   const pointer = useRef<{ x: number; y: number } | null>(null);
   const activeRef = useRef<TriviaItem | undefined>(undefined);
 
+  // 最後のカードID・現在のインデックス・カード一覧を refs で持ち stale closure を防ぐ
+  const lastCardIdRef = useRef<string | null>(null);
+  const activeIndexRef = useRef(0);
+  const cardsRef = useRef<TriviaItem[]>([]);
+  const fetchingNextRef = useRef(false);
+
   // ── フィード取得（retryCount が変わるたびに再実行） ─────────────────
   useEffect(() => {
     let cancelled = false;
@@ -37,7 +45,7 @@ export default function SwipePage() {
     fetchTriviaFeed()
       .then((items) => {
         if (cancelled) return;
-        setCards(prioritizeUnviewed(items, getViewedIds()));
+        setCards(prioritizeUnviewed(shuffle(items), getViewedIds()));
         setActiveIndex(0);
         setFeedStatus(items.length > 0 ? "ok" : "empty");
       })
@@ -50,13 +58,17 @@ export default function SwipePage() {
     };
   }, [retryCount]);
 
-  const total = cards.length;
   const active = cards[activeIndex];
 
-  // activeRef を常に最新に保つ（handleBookmark の stale closure を防ぐ）
+  // refs を最新状態に同期する
   useEffect(() => {
     activeRef.current = active;
   }, [active]);
+
+  useEffect(() => {
+    activeIndexRef.current = activeIndex;
+    cardsRef.current = cards;
+  }, [activeIndex, cards]);
 
   // ── 視聴履歴（ゲスト: localStorage / ログイン: API） ─────────────────
   useEffect(() => {
@@ -71,11 +83,53 @@ export default function SwipePage() {
     });
   }, [active]);
 
+  // ── 次バッチ取得 ──────────────────────────────────────────────────────
+  const loadNextBatch = useCallback(() => {
+    if (fetchingNextRef.current) return;
+    fetchingNextRef.current = true;
+    setFetchingNext(true);
+    setNextError(false);
+
+    const prevLastId = lastCardIdRef.current;
+
+    fetchTriviaFeed()
+      .then((items) => {
+        if (items.length === 0) {
+          throw new Error("Next trivia batch is empty");
+        }
+        const arranged = prioritizeUnviewed(shuffle(items), getViewedIds());
+        // 前バッチの最後と同じ雑学が先頭にならないよう調整
+        if (prevLastId && arranged.length > 1 && arranged[0].id === prevLastId) {
+          const idx = arranged.findIndex((it) => it.id !== prevLastId);
+          if (idx > 0) {
+            [arranged[0], arranged[idx]] = [arranged[idx], arranged[0]];
+          }
+        }
+        setCards(arranged);
+        setActiveIndex(0);
+        setFetchingNext(false);
+        fetchingNextRef.current = false;
+      })
+      .catch(() => {
+        setFetchingNext(false);
+        setNextError(true);
+        fetchingNextRef.current = false;
+      });
+  }, []);
+
   // ── ナビ ─────────────────────────────────────────────────────────────
   const next = useCallback(() => {
-    if (total === 0) return;
-    setActiveIndex((i) => Math.min(i + 1, total - 1));
-  }, [total]);
+    const idx = activeIndexRef.current;
+    const t = cardsRef.current.length;
+    if (t === 0) return;
+    if (idx < t - 1) {
+      setActiveIndex((i) => Math.min(i + 1, t - 1));
+      return;
+    }
+    // 最後のカード → 次バッチ取得
+    lastCardIdRef.current = cardsRef.current[t - 1]?.id ?? null;
+    loadNextBatch();
+  }, [loadNextBatch]);
 
   const prev = useCallback(() => {
     setActiveIndex((i) => Math.max(i - 1, 0));
@@ -102,8 +156,8 @@ export default function SwipePage() {
     setTimeout(() => setToast(null), 2000);
   }, []);
 
-  // ── 再取得（イベントハンドラから呼ぶので setState OK） ──────────────
-  const refreshCards = () => {
+  // ── 初回取得リトライ ─────────────────────────────────────────────────
+  const retryInitial = () => {
     setFeedStatus("loading");
     setRetryCount((n) => n + 1);
   };
@@ -176,7 +230,7 @@ export default function SwipePage() {
   }
 
   // ── エラー / 空 ────────────────────────────────────────────────────────
-  if (feedStatus === "error" || feedStatus === "empty" || total === 0) {
+  if (feedStatus === "error" || feedStatus === "empty" || cards.length === 0) {
     const message =
       feedStatus === "empty"
         ? "表示できる雑学がありません"
@@ -185,7 +239,7 @@ export default function SwipePage() {
       <main className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 text-white flex flex-col items-center justify-center gap-4">
         <p className="text-slate-300 text-sm">{message}</p>
         <button
-          onClick={refreshCards}
+          onClick={retryInitial}
           className="bg-white/10 hover:bg-white/20 text-white text-sm px-5 py-2 rounded-lg border border-white/20"
         >
           再試行
@@ -193,6 +247,8 @@ export default function SwipePage() {
       </main>
     );
   }
+
+  const total = cards.length;
 
   // ── メイン ─────────────────────────────────────────────────────────────
   return (
@@ -211,17 +267,22 @@ export default function SwipePage() {
         </div>
       )}
 
-      {/* ヘッダー */}
+      {/* ヘッダー（更新ボタンを削除、次バッチ取得中のインジケーターを追加） */}
       <div className="absolute top-6 left-0 right-0 px-6 flex justify-between items-center z-50">
         <Link href="/mypage" className="text-xs text-slate-300">
           マイページ
         </Link>
-        <button
-          onClick={refreshCards}
-          className="bg-white/10 hover:bg-white/20 text-white text-xs px-3 py-2 rounded-lg border border-white/20"
-        >
-          更新
-        </button>
+        {fetchingNext && (
+          <span className="text-xs text-slate-400 animate-pulse">読み込み中…</span>
+        )}
+        {nextError && !fetchingNext && (
+          <button
+            onClick={loadNextBatch}
+            className="text-xs text-slate-400 underline"
+          >
+            再試行
+          </button>
+        )}
       </div>
 
       {/* 背景コンテンツ */}
@@ -244,7 +305,6 @@ export default function SwipePage() {
             {active.title}
           </h1>
           <p className="text-slate-300 text-sm sm:text-base">{active.summary}</p>
-          {/* 情報源リンク */}
           <a
             href={active.source_url}
             target="_blank"
