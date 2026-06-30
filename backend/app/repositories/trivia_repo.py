@@ -20,6 +20,27 @@ def fetch_trivia_from_db(limit: int = 10) -> list[dict]:
 
 
 _INSERT_COLUMNS = ("title", "summary", "genre", "tags", "source_title", "source_url")
+# fallback upsert では id も明示的に保存する
+_UPSERT_FALLBACK_COLUMNS = ("id",) + _INSERT_COLUMNS
+
+
+def upsert_fallback_batch(items: list[dict]) -> None:
+    """fallback 雑学を id 指定で trivia テーブルへ upsert する。
+    ID が既に存在する場合は更新しない。
+    ブックマーク・視聴履歴の外部キー制約を成立させる目的で呼ぶ。
+    """
+    if not items:
+        return
+    if not settings.SUPABASE_URL or not settings.SUPABASE_SECRET_KEY:
+        raise RuntimeError("Supabase credentials not configured")
+
+    rows = [{col: item[col] for col in _UPSERT_FALLBACK_COLUMNS} for item in items]
+    client = create_client(
+        settings.SUPABASE_URL,
+        settings.SUPABASE_SECRET_KEY,
+        options=ClientOptions(postgrest_client_timeout=_TIMEOUT_SECS),
+    )
+    client.table("trivia").upsert(rows, on_conflict="id").execute()
 
 
 def save_trivia_batch(items: list[dict]) -> list[dict]:
