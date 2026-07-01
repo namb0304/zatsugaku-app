@@ -18,7 +18,10 @@ import { shuffle } from "@/lib/swipeUtils";
 import type { TriviaItem } from "@/types/trivia";
 
 const CENTER = 4.5;
+const TRANSITION_MS = 150;
+
 type FeedStatus = "loading" | "error" | "empty" | "ok";
+type PrefetchStatus = "idle" | "fetching" | "ready";
 
 /** シャッフル + 先頭重複防止 */
 function arrangeBatch(
@@ -42,6 +45,8 @@ export default function SwipePage() {
   const [retryCount, setRetryCount] = useState(0);
   const [fetchingNext, setFetchingNext] = useState(false);
   const [nextError, setNextError] = useState(false);
+  const [prefetchStatus, setPrefetchStatus] = useState<PrefetchStatus>("idle");
+  const [isSwitching, setIsSwitching] = useState(false);
 
   // ── UI 状態 ──────────────────────────────────────────────────────────
   const [activeIndex, setActiveIndex] = useState(0);
@@ -61,6 +66,17 @@ export default function SwipePage() {
   const nextBatchRef = useRef<TriviaItem[] | null>(null);
   const isPrefetchingRef = useRef(false);
   const userWaitingRef = useRef(false);
+  const isSwitchingRef = useRef(false);
+  const readyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const switchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // prefers-reduced-motion（CSR のみで参照）
+  const prefersReducedMotionRef = useRef(false);
+  useEffect(() => {
+    prefersReducedMotionRef.current = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+  }, []);
 
   // ── フィード取得（retryCount が変わるたびに再実行） ─────────────────
   useEffect(() => {
@@ -108,16 +124,48 @@ export default function SwipePage() {
   }, [active]);
 
   // ── バックグラウンド先読み ────────────────────────────────────────────
-  // POST /trivia/generate → 失敗時は GET /trivia/feed へフォールバック
-  // 自己参照のために ref 経由で呼び出す（lint の "before declaration" エラーを回避）
+  // 自己参照のために ref 経由で呼び出す（lint の before-declaration エラーを回避）
   const startPrefetchRef = useRef<() => void>(() => {});
+
+  const switchToBatch = useCallback((items: TriviaItem[]) => {
+    if (isSwitchingRef.current) return;
+    isSwitchingRef.current = true;
+
+    const arranged = arrangeBatch(items, lastCardIdRef.current);
+    nextBatchRef.current = null;
+    if (readyTimerRef.current) {
+      clearTimeout(readyTimerRef.current);
+      readyTimerRef.current = null;
+    }
+
+    const delay = prefersReducedMotionRef.current ? 0 : TRANSITION_MS;
+    if (delay > 0) setIsSwitching(true);
+
+    const completeSwitch = () => {
+      switchTimerRef.current = null;
+      setCards(arranged);
+      setActiveIndex(0);
+      setPrefetchStatus("idle");
+      setFetchingNext(false);
+      if (delay > 0) setIsSwitching(false);
+      isSwitchingRef.current = false;
+      startPrefetchRef.current();
+    };
+
+    if (delay === 0) {
+      completeSwitch();
+    } else {
+      switchTimerRef.current = setTimeout(completeSwitch, delay);
+    }
+  }, []);
 
   const startPrefetch = useCallback(() => {
     if (isPrefetchingRef.current) return;
     isPrefetchingRef.current = true;
+    setPrefetchStatus("fetching");
 
     generateTrivia()
-      .catch(() => fetchTriviaFeed()) // Gemini 失敗時のフォールバック
+      .catch(() => fetchTriviaFeed())
       .then((items) => {
         if (items.length === 0) throw new Error("empty batch");
 
@@ -125,25 +173,33 @@ export default function SwipePage() {
         isPrefetchingRef.current = false;
 
         if (userWaitingRef.current) {
-          // ユーザーが最後のカードで次へ進もうとして待機中 → 即座に切り替え
           userWaitingRef.current = false;
           setFetchingNext(false);
-          const arranged = arrangeBatch(items, lastCardIdRef.current);
-          nextBatchRef.current = null;
-          setCards(arranged);
-          setActiveIndex(0);
-          startPrefetchRef.current(); // 次の先読みを開始
+          if (readyTimerRef.current) {
+            clearTimeout(readyTimerRef.current);
+            readyTimerRef.current = null;
+          }
+          switchToBatch(items);
+        } else {
+          // バックグラウンド完了 → "準備できました" 表示（3秒後に消える）
+          setPrefetchStatus("ready");
+          if (readyTimerRef.current) clearTimeout(readyTimerRef.current);
+          readyTimerRef.current = setTimeout(() => {
+            setPrefetchStatus("idle");
+            readyTimerRef.current = null;
+          }, 3000);
         }
       })
       .catch(() => {
         isPrefetchingRef.current = false;
+        setPrefetchStatus("idle");
         if (userWaitingRef.current) {
           userWaitingRef.current = false;
           setFetchingNext(false);
           setNextError(true);
         }
       });
-  }, []); // refs とモジュール関数のみ参照 → 安定
+  }, [switchToBatch]);
 
   // ref を最新の startPrefetch に同期（effect 内でのみ ref を更新）
   useEffect(() => {
@@ -157,8 +213,18 @@ export default function SwipePage() {
     }
   }, [feedStatus, startPrefetch]);
 
+  useEffect(
+    () => () => {
+      if (readyTimerRef.current) clearTimeout(readyTimerRef.current);
+      if (switchTimerRef.current) clearTimeout(switchTimerRef.current);
+    },
+    [],
+  );
+
   // ── ナビ ─────────────────────────────────────────────────────────────
   const next = useCallback(() => {
+    if (isSwitchingRef.current) return;
+
     const idx = activeIndexRef.current;
     const t = cardsRef.current.length;
     if (t === 0) return;
@@ -167,26 +233,19 @@ export default function SwipePage() {
       return;
     }
 
-    // 最後のカード → 先読み済みバッチへ切り替え、またはバッチを待機
     lastCardIdRef.current = cardsRef.current[t - 1]?.id ?? null;
 
     if (nextBatchRef.current !== null) {
-      // 先読み完了 → 即切り替え
-      const arranged = arrangeBatch(nextBatchRef.current, lastCardIdRef.current);
-      nextBatchRef.current = null;
-      setCards(arranged);
-      setActiveIndex(0);
-      startPrefetch(); // 次の先読みを開始
+      switchToBatch(nextBatchRef.current);
     } else {
-      // 先読み中または未開始 → 完了後に自動切り替え
       userWaitingRef.current = true;
       setFetchingNext(true);
       setNextError(false);
       if (!isPrefetchingRef.current) {
-        startPrefetch(); // まだ始まっていなければ今すぐ開始
+        startPrefetchRef.current();
       }
     }
-  }, [startPrefetch]);
+  }, [switchToBatch]);
 
   const prev = useCallback(() => {
     setActiveIndex((i) => Math.max(i - 1, 0));
@@ -215,7 +274,8 @@ export default function SwipePage() {
 
   // ── 初回取得リトライ ─────────────────────────────────────────────────
   const retryInitial = () => {
-    nextBatchRef.current = null; // 古い先読み結果を破棄
+    nextBatchRef.current = null;
+    setPrefetchStatus("idle");
     setFeedStatus("loading");
     setRetryCount((n) => n + 1);
   };
@@ -225,8 +285,8 @@ export default function SwipePage() {
     setNextError(false);
     setFetchingNext(true);
     userWaitingRef.current = true;
-    startPrefetch();
-  }, [startPrefetch]);
+    startPrefetchRef.current();
+  }, []);
 
   // ── ポインター ────────────────────────────────────────────────────────
   const onPointerDown = (e: React.PointerEvent) => {
@@ -338,9 +398,15 @@ export default function SwipePage() {
         <Link href="/mypage" className="text-xs text-slate-300">
           マイページ
         </Link>
-        {fetchingNext && (
+        {/* 先読みフィードバック */}
+        {(fetchingNext || prefetchStatus === "fetching") && !nextError && (
           <span className="text-xs text-slate-400 animate-pulse">
-            読み込み中…
+            次の雑学を準備中
+          </span>
+        )}
+        {!fetchingNext && prefetchStatus === "ready" && !nextError && (
+          <span className="text-xs text-emerald-400/80">
+            次の10件を準備できました
           </span>
         )}
         {nextError && !fetchingNext && (
@@ -353,8 +419,12 @@ export default function SwipePage() {
         )}
       </div>
 
-      {/* 背景コンテンツ */}
-      <div className="absolute inset-0 flex items-start justify-center px-8 pt-35">
+      {/* 背景コンテンツ（バッチ切り替え時にフェード） */}
+      <div
+        className={`absolute inset-0 flex items-start justify-center px-8 pt-35 transition-opacity duration-150 motion-reduce:transition-none ${
+          isSwitching ? "opacity-0" : "opacity-100"
+        }`}
+      >
         <div className="text-center max-w-xl">
           <div className="mb-4 flex flex-wrap items-center justify-center gap-2">
             <span className="rounded-full bg-blue-400/10 px-2.5 py-1 text-xs font-medium text-blue-300">
@@ -444,7 +514,7 @@ export default function SwipePage() {
         </div>
       </div>
 
-      <div className="absolute bottom-3 w-full text-center text-xs text-slate-500">
+      <div className="absolute bottom-3 hidden w-full text-center text-xs text-slate-500 sm:block">
         PC：左右キー・マウスドラッグ・クリックでカード選択 / 上キー・上にドラッグでブックマーク
         <br />
         スマホ：タップでカード選択 / 上にスワイプでブックマーク

@@ -31,8 +31,14 @@ vi.mock("@/lib/viewHistory", () => ({
   prioritizeUnviewed: vi.fn((items) => items),
 }));
 
+vi.mock("@/lib/swipeUtils", () => ({
+  shuffle: vi.fn((items) => items),
+}));
+
 import * as api from "@/lib/api";
 import SwipePage from "@/app/swipe/page";
+
+const TRANSITION_WAIT_MS = 350;
 
 function makeCards(count: number, prefix: string) {
   return Array.from({ length: count }, (_, i) => ({
@@ -200,6 +206,38 @@ describe("スワイプページ: Gemini 先読み", () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
+  it("最後のカードで連続操作しても次のバッチを飛ばさない", async () => {
+    mockFetch.mockResolvedValue(makeCards(10, "feed"));
+    mockGenerate
+      .mockResolvedValueOnce(makeCards(10, "generated"))
+      .mockResolvedValue(makeCards(10, "third"));
+
+    render(<SwipePage />);
+
+    await waitFor(() =>
+      expect(screen.getByText("次の10件を準備できました")).toBeInTheDocument(),
+    );
+    await navigateToLastCard();
+
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "ArrowRight" });
+      fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "generated タイトル 0" }),
+      ).toBeInTheDocument(),
+    );
+    await act(
+      () => new Promise((resolve) => setTimeout(resolve, TRANSITION_WAIT_MS)),
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "generated タイトル 0" }),
+    ).toBeInTheDocument();
+  });
+
   it("生成失敗時に GET /trivia/feed へフォールバックする", async () => {
     mockFetch.mockResolvedValue(makeCards(10, "feed"));
     mockGenerate.mockRejectedValue(new Error("403 permission denied"));
@@ -244,5 +282,78 @@ describe("スワイプページ: Gemini 先読み", () => {
 
     // バッチ切り替え前なので次の先読みは始まらない
     expect(mockGenerate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("スワイプページ: 先読みフィードバック表示", () => {
+  const mockFetch = vi.mocked(api.fetchTriviaFeed);
+  const mockGenerate = vi.mocked(api.generateTrivia);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFetch.mockReset();
+    mockGenerate.mockReset();
+  });
+
+  it("先読み中は「次の雑学を準備中」が表示される", async () => {
+    mockFetch.mockResolvedValue(makeCards(10, "feed"));
+    let resolveGenerate!: (v: ReturnType<typeof makeCards>) => void;
+    mockGenerate.mockReturnValue(
+      new Promise<ReturnType<typeof makeCards>>((resolve) => {
+        resolveGenerate = resolve;
+      }),
+    );
+
+    render(<SwipePage />);
+
+    await waitFor(() =>
+      expect(screen.getByText("1 / 10")).toBeInTheDocument(),
+    );
+    await waitFor(() => expect(mockGenerate).toHaveBeenCalledTimes(1));
+
+    expect(screen.getByText("次の雑学を準備中")).toBeInTheDocument();
+
+    // クリーンアップ
+    resolveGenerate(makeCards(10, "generated"));
+    await act(async () => {});
+  });
+
+  it("先読み完了後は「次の10件を準備できました」が表示される", async () => {
+    mockFetch.mockResolvedValue(makeCards(10, "feed"));
+    mockGenerate.mockResolvedValue(makeCards(10, "generated"));
+
+    render(<SwipePage />);
+
+    await waitFor(() =>
+      expect(screen.getByText("1 / 10")).toBeInTheDocument(),
+    );
+    await waitFor(() => expect(mockGenerate).toHaveBeenCalledTimes(1));
+    await act(async () => {}); // .then() を確実に実行
+
+    expect(screen.getByText("次の10件を準備できました")).toBeInTheDocument();
+  });
+
+  it("先読み失敗でユーザーが最後まで進むと再試行ボタンが表示される", async () => {
+    mockFetch
+      .mockResolvedValueOnce(makeCards(10, "first"))
+      .mockRejectedValue(new Error("503"));
+    mockGenerate.mockRejectedValue(new Error("403"));
+
+    render(<SwipePage />);
+
+    await waitFor(() =>
+      expect(screen.queryByText("読み込み中…")).not.toBeInTheDocument(),
+    );
+
+    await navigateToLastCard();
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "再試行" }),
+      ).toBeInTheDocument(),
+    );
   });
 });
