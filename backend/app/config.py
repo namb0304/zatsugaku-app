@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str | None = None
     FRONTEND_ORIGIN: str = "http://localhost:3000"
     # Gemini-specific safe default, documented in .env.example
-    GEMINI_MODEL: str = "gemini-3.5-flash"
+    GEMINI_MODEL: str = "gemini-3.1-flash-lite"
 
 
 settings = Settings()

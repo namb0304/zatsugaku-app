@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { addBookmark, fetchTriviaFeed, postViewHistory } from "@/lib/api";
+import {
+  addBookmark,
+  fetchTriviaFeed,
+  generateTrivia,
+  postViewHistory,
+} from "@/lib/api";
 import { authService } from "@/services/authService";
 import {
   getViewedIds,
@@ -14,6 +19,21 @@ import type { TriviaItem } from "@/types/trivia";
 
 const CENTER = 4.5;
 type FeedStatus = "loading" | "error" | "empty" | "ok";
+
+/** シャッフル + 先頭重複防止 */
+function arrangeBatch(
+  items: TriviaItem[],
+  prevLastId: string | null,
+): TriviaItem[] {
+  const arranged = prioritizeUnviewed(shuffle(items), getViewedIds());
+  if (prevLastId && arranged.length > 1 && arranged[0].id === prevLastId) {
+    const idx = arranged.findIndex((it) => it.id !== prevLastId);
+    if (idx > 0) {
+      [arranged[0], arranged[idx]] = [arranged[idx], arranged[0]];
+    }
+  }
+  return arranged;
+}
 
 export default function SwipePage() {
   // ── データ ──────────────────────────────────────────────────────────
@@ -32,11 +52,15 @@ export default function SwipePage() {
   const pointer = useRef<{ x: number; y: number } | null>(null);
   const activeRef = useRef<TriviaItem | undefined>(undefined);
 
-  // 最後のカードID・現在のインデックス・カード一覧を refs で持ち stale closure を防ぐ
+  // stale closure 防止 refs
   const lastCardIdRef = useRef<string | null>(null);
   const activeIndexRef = useRef(0);
   const cardsRef = useRef<TriviaItem[]>([]);
-  const fetchingNextRef = useRef(false);
+
+  // バックグラウンド先読み用 refs
+  const nextBatchRef = useRef<TriviaItem[] | null>(null);
+  const isPrefetchingRef = useRef(false);
+  const userWaitingRef = useRef(false);
 
   // ── フィード取得（retryCount が変わるたびに再実行） ─────────────────
   useEffect(() => {
@@ -83,39 +107,55 @@ export default function SwipePage() {
     });
   }, [active]);
 
-  // ── 次バッチ取得 ──────────────────────────────────────────────────────
-  const loadNextBatch = useCallback(() => {
-    if (fetchingNextRef.current) return;
-    fetchingNextRef.current = true;
-    setFetchingNext(true);
-    setNextError(false);
+  // ── バックグラウンド先読み ────────────────────────────────────────────
+  // POST /trivia/generate → 失敗時は GET /trivia/feed へフォールバック
+  // 自己参照のために ref 経由で呼び出す（lint の "before declaration" エラーを回避）
+  const startPrefetchRef = useRef<() => void>(() => {});
 
-    const prevLastId = lastCardIdRef.current;
+  const startPrefetch = useCallback(() => {
+    if (isPrefetchingRef.current) return;
+    isPrefetchingRef.current = true;
 
-    fetchTriviaFeed()
+    generateTrivia()
+      .catch(() => fetchTriviaFeed()) // Gemini 失敗時のフォールバック
       .then((items) => {
-        if (items.length === 0) {
-          throw new Error("Next trivia batch is empty");
+        if (items.length === 0) throw new Error("empty batch");
+
+        nextBatchRef.current = items;
+        isPrefetchingRef.current = false;
+
+        if (userWaitingRef.current) {
+          // ユーザーが最後のカードで次へ進もうとして待機中 → 即座に切り替え
+          userWaitingRef.current = false;
+          setFetchingNext(false);
+          const arranged = arrangeBatch(items, lastCardIdRef.current);
+          nextBatchRef.current = null;
+          setCards(arranged);
+          setActiveIndex(0);
+          startPrefetchRef.current(); // 次の先読みを開始
         }
-        const arranged = prioritizeUnviewed(shuffle(items), getViewedIds());
-        // 前バッチの最後と同じ雑学が先頭にならないよう調整
-        if (prevLastId && arranged.length > 1 && arranged[0].id === prevLastId) {
-          const idx = arranged.findIndex((it) => it.id !== prevLastId);
-          if (idx > 0) {
-            [arranged[0], arranged[idx]] = [arranged[idx], arranged[0]];
-          }
-        }
-        setCards(arranged);
-        setActiveIndex(0);
-        setFetchingNext(false);
-        fetchingNextRef.current = false;
       })
       .catch(() => {
-        setFetchingNext(false);
-        setNextError(true);
-        fetchingNextRef.current = false;
+        isPrefetchingRef.current = false;
+        if (userWaitingRef.current) {
+          userWaitingRef.current = false;
+          setFetchingNext(false);
+          setNextError(true);
+        }
       });
-  }, []);
+  }, []); // refs とモジュール関数のみ参照 → 安定
+
+  // ref を最新の startPrefetch に同期（effect 内でのみ ref を更新）
+  useEffect(() => {
+    startPrefetchRef.current = startPrefetch;
+  }, [startPrefetch]);
+
+  // 初回表示完了後に次バッチをバックグラウンドで先読みする
+  useEffect(() => {
+    if (feedStatus === "ok") {
+      startPrefetch();
+    }
+  }, [feedStatus, startPrefetch]);
 
   // ── ナビ ─────────────────────────────────────────────────────────────
   const next = useCallback(() => {
@@ -126,10 +166,27 @@ export default function SwipePage() {
       setActiveIndex((i) => Math.min(i + 1, t - 1));
       return;
     }
-    // 最後のカード → 次バッチ取得
+
+    // 最後のカード → 先読み済みバッチへ切り替え、またはバッチを待機
     lastCardIdRef.current = cardsRef.current[t - 1]?.id ?? null;
-    loadNextBatch();
-  }, [loadNextBatch]);
+
+    if (nextBatchRef.current !== null) {
+      // 先読み完了 → 即切り替え
+      const arranged = arrangeBatch(nextBatchRef.current, lastCardIdRef.current);
+      nextBatchRef.current = null;
+      setCards(arranged);
+      setActiveIndex(0);
+      startPrefetch(); // 次の先読みを開始
+    } else {
+      // 先読み中または未開始 → 完了後に自動切り替え
+      userWaitingRef.current = true;
+      setFetchingNext(true);
+      setNextError(false);
+      if (!isPrefetchingRef.current) {
+        startPrefetch(); // まだ始まっていなければ今すぐ開始
+      }
+    }
+  }, [startPrefetch]);
 
   const prev = useCallback(() => {
     setActiveIndex((i) => Math.max(i - 1, 0));
@@ -158,9 +215,18 @@ export default function SwipePage() {
 
   // ── 初回取得リトライ ─────────────────────────────────────────────────
   const retryInitial = () => {
+    nextBatchRef.current = null; // 古い先読み結果を破棄
     setFeedStatus("loading");
     setRetryCount((n) => n + 1);
   };
+
+  // ── 次バッチ取得リトライ ─────────────────────────────────────────────
+  const retryNextFetch = useCallback(() => {
+    setNextError(false);
+    setFetchingNext(true);
+    userWaitingRef.current = true;
+    startPrefetch();
+  }, [startPrefetch]);
 
   // ── ポインター ────────────────────────────────────────────────────────
   const onPointerDown = (e: React.PointerEvent) => {
@@ -267,17 +333,19 @@ export default function SwipePage() {
         </div>
       )}
 
-      {/* ヘッダー（更新ボタンを削除、次バッチ取得中のインジケーターを追加） */}
+      {/* ヘッダー */}
       <div className="absolute top-6 left-0 right-0 px-6 flex justify-between items-center z-50">
         <Link href="/mypage" className="text-xs text-slate-300">
           マイページ
         </Link>
         {fetchingNext && (
-          <span className="text-xs text-slate-400 animate-pulse">読み込み中…</span>
+          <span className="text-xs text-slate-400 animate-pulse">
+            読み込み中…
+          </span>
         )}
         {nextError && !fetchingNext && (
           <button
-            onClick={loadNextBatch}
+            onClick={retryNextFetch}
             className="text-xs text-slate-400 underline"
           >
             再試行

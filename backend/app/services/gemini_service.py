@@ -10,7 +10,7 @@ _GENRES = (
     "自然・科学・宇宙\n生き物\n人体・医学\n歴史・偉人\n言葉・語源\n"
     "食べ物・料理\n地理・世界の文化\n生活・日常の疑問\nエンタメ・芸術・スポーツ\nサブカル・マニアック"
 )
-_TIMEOUT_MS = 10_000
+_TIMEOUT_MS = 60_000
 
 
 class GeminiGenerationError(Exception):
@@ -83,6 +83,7 @@ def generate(
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=GeminiResponse,
+                thinking_config=types.ThinkingConfig(thinking_level="minimal"),
             ),
         )
 

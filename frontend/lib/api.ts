@@ -19,14 +19,16 @@ const API_BASE = (
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"
 ).replace(/\/$/, "");
 const REQUEST_TIMEOUT_MS = 10_000;
+const GENERATION_TIMEOUT_MS = 60_000;
 
 async function apiFetch(
   path: string,
   init: RequestInit = {},
   accessToken?: string | null,
+  timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<Response> {
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -145,6 +147,34 @@ export async function postViewHistory(
     accessToken,
   );
   if (!res.ok) throw new Error(`save view history failed: ${res.status}`);
+}
+
+export async function generateTrivia(): Promise<TriviaItem[]> {
+  const res = await apiFetch(
+    "/trivia/generate",
+    { method: "POST" },
+    undefined,
+    GENERATION_TIMEOUT_MS,
+  );
+  if (!res.ok) throw new Error(`generate trivia failed: ${res.status}`);
+
+  const data: unknown = await res.json();
+  if (
+    typeof data !== "object" ||
+    data === null ||
+    !("items" in data) ||
+    !Array.isArray(data.items) ||
+    !data.items.every(isTriviaItem)
+  ) {
+    throw new Error("generate response has an invalid format");
+  }
+  if (
+    new Set(data.items.map((item) => item.id)).size !==
+    data.items.length
+  ) {
+    throw new Error("generate response contains duplicate IDs");
+  }
+  return data.items;
 }
 
 export async function fetchTriviaFeed(): Promise<TriviaItem[]> {

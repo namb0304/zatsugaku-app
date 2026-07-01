@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
+from google.genai import types
 import pytest
 
 from app.main import app
@@ -198,14 +199,22 @@ def test_gemini_service_validates_and_removes_confidence_note():
         text=json.dumps(_gemini_payload(), ensure_ascii=False)
     )
 
-    with patch("app.services.gemini_service.genai.Client", return_value=fake_client):
+    with patch(
+        "app.services.gemini_service.genai.Client",
+        return_value=fake_client,
+    ) as client_constructor:
         items = gemini_service.generate()
 
     assert len(items) == 10
     assert "confidence_note" not in items[0]
+    assert client_constructor.call_args.kwargs["http_options"].timeout == 60_000
     client_kwargs = fake_client.models.generate_content.call_args.kwargs
     assert client_kwargs["config"].response_mime_type == "application/json"
     assert client_kwargs["config"].response_schema is GeminiResponse
+    assert (
+        client_kwargs["config"].thinking_config.thinking_level
+        == types.ThinkingLevel.MINIMAL
+    )
 
 
 @pytest.mark.parametrize(
