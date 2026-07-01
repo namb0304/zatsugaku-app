@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from app.dependencies import get_current_user_id
+from app.dependencies import get_current_user_id, get_optional_user_id
 
 
 def test_auth_rejects_missing_header():
@@ -50,3 +50,50 @@ def test_auth_hides_supabase_error_details():
 
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "Unauthorized"
+
+
+# ── get_optional_user_id ────────────────────────────────────────────────────────
+
+
+def test_optional_auth_returns_none_when_no_header():
+    """Authorization ヘッダーが無い場合は None を返す（ゲスト）。"""
+    result = get_optional_user_id(None)
+    assert result is None
+
+
+def test_optional_auth_returns_user_id_for_valid_token():
+    """有効なトークンの場合はユーザー ID を返す。"""
+    auth = MagicMock()
+    auth.get_user.return_value = SimpleNamespace(
+        user=SimpleNamespace(id="00000000-0000-4000-8000-000000000001")
+    )
+    supabase = SimpleNamespace(auth=auth)
+
+    with patch("app.dependencies.create_client", return_value=supabase):
+        result = get_optional_user_id("Bearer valid-token")
+
+    assert result == "00000000-0000-4000-8000-000000000001"
+
+
+@pytest.mark.parametrize(
+    "authorization",
+    ["Basic abc", "Bearer", "Bearer ", "invalid"],
+)
+def test_optional_auth_raises_401_on_malformed_header(authorization: str):
+    """不正な形式のヘッダーは 401（ゲスト扱いにしない）。"""
+    with pytest.raises(HTTPException) as exc_info:
+        get_optional_user_id(authorization)
+
+    assert exc_info.value.status_code == 401
+
+
+def test_optional_auth_raises_401_on_invalid_token():
+    """Bearer トークンが無効なら 401（ゲスト扱いにしない）。"""
+    with patch(
+        "app.dependencies.create_client",
+        side_effect=RuntimeError("token verification failed"),
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            get_optional_user_id("Bearer invalid-token")
+
+    assert exc_info.value.status_code == 401

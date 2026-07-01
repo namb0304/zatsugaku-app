@@ -9,10 +9,10 @@
 | 領域 | 採用技術 |
 |---|---|
 | フロントエンド | Next.js 16 + TypeScript + Tailwind CSS v4 |
-| バックエンド | FastAPI（基盤・ヘルスチェック実装済み） |
-| DB | Supabase PostgreSQL（環境構築済み・API連携前） |
-| 認証 | Supabase Auth（環境構築済み・画面連携前） |
-| AI | Gemini API（連携前） |
+| バックエンド | FastAPI |
+| DB | Supabase PostgreSQL |
+| 認証 | Supabase Auth |
+| AI | Gemini API |
 
 ---
 
@@ -29,12 +29,12 @@ zatsugaku-app/
 │   └── GeminiPromptDraft.md
 └── frontend/           # Next.js フロントエンド
     └── app/
-        ├── page.tsx        # / → /login へリダイレクト
+        ├── page.tsx        # / → /swipe へリダイレクト
         ├── login/          # ログイン画面
         ├── genre/          # ジャンル選択画面
         ├── swipe/          # メインのスワイプ画面
-        ├── bookmarks/      # ブックマーク一覧
-        └── mypage/         # マイページ（ジャンル設定・ログアウト）
+        ├── bookmarks/      # /mypage への互換リダイレクト
+        └── mypage/         # ジャンル設定・ブックマーク・ログアウト
 ```
 
 ---
@@ -42,19 +42,24 @@ zatsugaku-app/
 ## 画面遷移
 
 ```
+/  → /swipe（即リダイレクト）
+
+/swipe（メイン・ゲストも閲覧可能）
+  └── マイページリンク → /mypage
+
 /login
-  ├── ログイン → /genre
-  └── ログインせずに続ける → /genre
+  ├── ログイン成功 → /swipe
+  ├── 新規登録成功 → /genre（ジャンル選択）
+  └── ゲストとして続ける → /swipe
 
 /genre（ジャンル選択）
   └── はじめる → /swipe
 
-/swipe（メイン画面）
-  ├── マイページリンク → /mypage
-  └── ブックマーク一覧リンク → /bookmarks
-
 /mypage
-  └── ブックマーク一覧リンク → /bookmarks
+  ├── ジャンルタブ（選択・リモート保存）
+  └── ブックマークタブ（一覧・削除）
+
+/bookmarks → /mypage（リダイレクト）
 ```
 
 ---
@@ -96,36 +101,48 @@ cd backend
 
 | 操作 | 動作 |
 |---|---|
-| 右スワイプ / → キー | 次のカードへ進む |
-| 左スワイプ / ← キー | 前のカードへ戻る |
-| 上スワイプ / ↑ キー | ブックマーク保存（カードが上に飛ぶ） |
+| 左スワイプ / → キー | 次のカードへ進む |
+| 右スワイプ / ← キー | 前のカードへ戻る |
+| 上スワイプ / ↑ キー | ブックマーク保存 |
 | カードタップ | そのカードを選択 |
 
-- 1セッション10枚。10枚使い切るとドロー演出で次の10枚が補充される
+- 1セッション10枚。表示中に次の10枚を先読みし、最後まで進むと自動で切り替わる
 - カードはトランプの手札のように半円状に並ぶ
 
 ---
 
 ## 実装状況
 
-### 完了（フロントのみ・モックデータ）
+### フロントエンド
 
-- [x] ログイン画面（入力フォーム、遷移のみ）
-- [x] ジャンル選択（トグル選択・`localStorage`保存）
-- [x] スワイプ画面（ファン表示・各種スワイプ・ブックマーク・ドロー演出）
-- [x] ブックマーク一覧（モック表示）
-- [x] マイページ（ジャンルトグル・`localStorage`連動・ログアウト遷移）
+- [x] ログイン・新規登録画面（Supabase Auth 連携済み）
+- [x] ジャンル選択（トグル選択・`localStorage` + リモートAPI保存）
+- [x] スワイプ画面（ファン表示・各種スワイプ・Gemini先読み・バッチ切替アニメーション）
+- [x] ブックマーク（スワイプアップ/↑キーで保存・ログイン必須）
+- [x] マイページ（ジャンルタブ・ブックマークタブ・ログアウト）
+- [x] ゲストの視聴履歴（`localStorage`）
+- [x] ゲスト→ログイン後のパーソナライズフィード切替
 
-### 未実装（バックエンド連携待ち）
+### バックエンド API
 
-- [ ] Supabase Auth による認証（現在は画面遷移のみ）
-- [x] `GET /trivia/feed` へのフロント接続
-- [ ] `POST /trivia/generate` による雑学生成
-- [ ] `POST /bookmarks` / `GET /bookmarks` / `DELETE /bookmarks/:id`
-- [ ] `GET /me/preferences` / `PUT /me/preferences`
-- [ ] 視聴履歴の記録
-- [ ] ミドルウェアによる未ログイン時リダイレクト（`middleware.ts`）
-- [x] APIでのフォールバック用事前データ返却
+- [x] `GET /health`
+- [x] `GET /trivia/feed`（未ログイン：ゲストフィード、ログイン：パーソナライズ）
+- [x] `POST /trivia/generate`（Gemini生成 + 失敗時フォールバック）
+- [x] `GET /bookmarks` / `POST /bookmarks` / `DELETE /bookmarks/:id`
+- [x] `GET /me/preferences` / `PUT /me/preferences`
+- [x] `POST /me/view-history`
+- [x] Supabase Auth によるトークン検証・ユーザーID取得
+
+### パーソナライズ
+
+- [x] 選択ジャンル +3 / ブックマークジャンル +2 / ブックマークタグ +1 の重みスコアリング
+- [x] 視聴済み雑学を候補から除外
+- [x] Gemini プロンプトへ選択ジャンル・タグを反映
+
+### Gemini / フォールバック
+
+- [x] Gemini 失敗時（403含む）→ DB または fallback.json を返す
+- [x] Gemini実生成とSupabase保存をローカル環境で確認済み
 
 ---
 

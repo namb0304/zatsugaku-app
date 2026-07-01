@@ -149,11 +149,13 @@ export async function postViewHistory(
   if (!res.ok) throw new Error(`save view history failed: ${res.status}`);
 }
 
-export async function generateTrivia(): Promise<TriviaItem[]> {
+export async function generateTrivia(
+  accessToken?: string | null,
+): Promise<TriviaItem[]> {
   const res = await apiFetch(
     "/trivia/generate",
     { method: "POST" },
-    undefined,
+    accessToken,
     GENERATION_TIMEOUT_MS,
   );
   if (!res.ok) throw new Error(`generate trivia failed: ${res.status}`);
@@ -177,34 +179,24 @@ export async function generateTrivia(): Promise<TriviaItem[]> {
   return data.items;
 }
 
-export async function fetchTriviaFeed(): Promise<TriviaItem[]> {
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(
-    () => controller.abort(),
-    REQUEST_TIMEOUT_MS,
-  );
+export async function fetchTriviaFeed(
+  accessToken?: string | null,
+): Promise<TriviaItem[]> {
+  const res = await apiFetch("/trivia/feed", {}, accessToken);
+  if (!res.ok) throw new Error(`feed fetch failed: ${res.status}`);
 
-  try {
-    const res = await fetch(`${API_BASE}/trivia/feed`, {
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new Error(`feed fetch failed: ${res.status}`);
-
-    const data: unknown = await res.json();
-    if (
-      typeof data !== "object" ||
-      data === null ||
-      !("items" in data) ||
-      !Array.isArray(data.items) ||
-      !data.items.every(isTriviaItem)
-    ) {
-      throw new Error("feed response has an invalid format");
-    }
-    if (new Set(data.items.map((item) => item.id)).size !== data.items.length) {
-      throw new Error("feed response contains duplicate IDs");
-    }
-    return data.items;
-  } finally {
-    window.clearTimeout(timeoutId);
+  const data: unknown = await res.json();
+  if (
+    typeof data !== "object" ||
+    data === null ||
+    !("items" in data) ||
+    !Array.isArray(data.items) ||
+    !data.items.every(isTriviaItem)
+  ) {
+    throw new Error("feed response has an invalid format");
   }
+  if (new Set(data.items.map((item) => item.id)).size !== data.items.length) {
+    throw new Error("feed response contains duplicate IDs");
+  }
+  return data.items;
 }

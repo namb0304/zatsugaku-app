@@ -217,6 +217,27 @@ def test_gemini_service_validates_and_removes_confidence_note():
     )
 
 
+def test_gemini_prompt_includes_preferred_genres_and_tags():
+    """選択・ブックマーク由来のシグナルを生成プロンプトへ含める。"""
+    fake_client = MagicMock()
+    fake_client.models.generate_content.return_value = SimpleNamespace(
+        text=json.dumps(_gemini_payload(), ensure_ascii=False)
+    )
+
+    with patch(
+        "app.services.gemini_service.genai.Client",
+        return_value=fake_client,
+    ):
+        gemini_service.generate(
+            preferred_genres=["生き物"],
+            preferred_tags=["深海", "魚"],
+        )
+
+    prompt = fake_client.models.generate_content.call_args.kwargs["contents"]
+    assert "優先ジャンル: 生き物" in prompt
+    assert "優先タグ: 深海, 魚" in prompt
+
+
 @pytest.mark.parametrize(
     "sdk_result",
     [
@@ -293,6 +314,125 @@ def test_save_trivia_batch_inserts_only_allowed_columns():
         "source_title",
         "source_url",
     }
+
+
+def test_generate_passes_preferred_genres_when_logged_in():
+    """ログイン中は選択ジャンルを Gemini に渡す。"""
+    from types import SimpleNamespace
+    auth = MagicMock()
+    auth.get_user.return_value = SimpleNamespace(
+        user=SimpleNamespace(id="user-123")
+    )
+    supabase = SimpleNamespace(auth=auth)
+
+    with (
+        patch("app.dependencies.create_client", return_value=supabase),
+        patch(
+            "app.repositories.preferences_repo.get_preferences",
+            return_value=["自然・科学・宇宙", "歴史・偉人"],
+        ),
+        patch("app.repositories.bookmark_repo.list_bookmarks", return_value=[]),
+        patch("app.routers.trivia.gemini_generate", return_value=_GEMINI_ITEMS) as mock_gen,
+        patch("app.repositories.trivia_repo.save_trivia_batch", return_value=_SAVED_ROWS),
+    ):
+        response = client.post(
+            "/trivia/generate",
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+    assert response.status_code == 201
+    mock_gen.assert_called_once_with(
+        preferred_genres=["自然・科学・宇宙", "歴史・偉人"],
+        preferred_tags=None,
+    )
+
+
+def test_generate_uses_bookmark_genres_and_tags():
+    """ブックマーク由来のジャンルとタグをGeminiへ渡す。"""
+    auth = MagicMock()
+    auth.get_user.return_value = SimpleNamespace(
+        user=SimpleNamespace(id="user-123")
+    )
+    supabase = SimpleNamespace(auth=auth)
+    bookmarks = [
+        {
+            "trivia": {
+                "genre": "生き物",
+                "tags": ["深海", "魚"],
+            }
+        }
+    ]
+
+    with (
+        patch("app.dependencies.create_client", return_value=supabase),
+        patch("app.repositories.preferences_repo.get_preferences", return_value=[]),
+        patch(
+            "app.repositories.bookmark_repo.list_bookmarks",
+            return_value=bookmarks,
+        ),
+        patch(
+            "app.routers.trivia.gemini_generate",
+            return_value=_GEMINI_ITEMS,
+        ) as mock_gen,
+        patch(
+            "app.repositories.trivia_repo.save_trivia_batch",
+            return_value=_SAVED_ROWS,
+        ),
+    ):
+        response = client.post(
+            "/trivia/generate",
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+    assert response.status_code == 201
+    mock_gen.assert_called_once_with(
+        preferred_genres=["生き物"],
+        preferred_tags=["深海", "魚"],
+    )
+
+
+def test_generate_returns_401_on_invalid_token():
+    """無効なトークンは 401 を返す。"""
+    with patch(
+        "app.dependencies.create_client",
+        side_effect=RuntimeError("Supabase error"),
+    ):
+        response = client.post(
+            "/trivia/generate",
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+
+    assert response.status_code == 401
+
+
+def test_generate_failure_uses_personalized_fallback_when_logged_in():
+    """ログイン中の生成失敗でもパーソナライズ済みフィードを返す。"""
+    auth = MagicMock()
+    auth.get_user.return_value = SimpleNamespace(
+        user=SimpleNamespace(id="user-123")
+    )
+    supabase = SimpleNamespace(auth=auth)
+
+    with (
+        patch("app.dependencies.create_client", return_value=supabase),
+        patch("app.repositories.preferences_repo.get_preferences", return_value=[]),
+        patch("app.repositories.bookmark_repo.list_bookmarks", return_value=[]),
+        patch(
+            "app.routers.trivia.gemini_generate",
+            side_effect=GeminiGenerationError("403"),
+        ),
+        patch(
+            "app.routers.trivia.feed_service.get_personalized_feed",
+            return_value=_FALLBACK_DB_ROWS,
+        ) as mock_personalized_feed,
+    ):
+        response = client.post(
+            "/trivia/generate",
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+    assert response.status_code == 201
+    mock_personalized_feed.assert_called_once_with("user-123")
 
 
 def test_generate_hides_internal_error_when_fallback_also_fails():

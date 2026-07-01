@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 from fastapi.testclient import TestClient
@@ -180,3 +181,117 @@ def test_feed_does_not_upsert_when_db_is_full():
         client.get("/trivia/feed")
 
     mock_upsert.assert_not_called()
+
+
+# ── 認証・パーソナライズ ────────────────────────────────────────────────────────
+
+
+def _auth_supabase(user_id: str = "user-123"):
+    """有効なトークンを返すモック Supabase クライアントを作る。"""
+    auth = MagicMock()
+    auth.get_user.return_value = SimpleNamespace(
+        user=SimpleNamespace(id=user_id)
+    )
+    return SimpleNamespace(auth=auth)
+
+
+def test_feed_returns_401_on_invalid_token():
+    """無効な Bearer トークンはゲスト扱いにせず 401 を返す。"""
+    with patch(
+        "app.dependencies.create_client",
+        side_effect=RuntimeError("Supabase error"),
+    ):
+        response = client.get(
+            "/trivia/feed",
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+
+    assert response.status_code == 401
+
+
+def test_feed_returns_401_on_malformed_auth_header():
+    """Bearer 以外のスキームは 401。"""
+    response = client.get(
+        "/trivia/feed",
+        headers={"Authorization": "Basic some-token"},
+    )
+    assert response.status_code == 401
+
+
+def test_feed_returns_personalized_feed_when_logged_in():
+    """ログイン中はパーソナライズされたフィードを返す（選択ジャンルが先頭）。"""
+    history_row = {
+        **_DB_ROWS[0],
+        "id": "aa000000-0000-4000-8000-000000000099",
+        "genre": "歴史・偉人",
+    }
+    rows = [history_row] + _DB_ROWS[1:]  # 歴史 row を先頭以外に配置（DB順はスコア無視）
+
+    with (
+        patch("app.dependencies.create_client", return_value=_auth_supabase()),
+        patch("app.repositories.preferences_repo.get_preferences", return_value=["歴史・偉人"]),
+        patch("app.repositories.bookmark_repo.list_bookmarks", return_value=[]),
+        patch("app.repositories.view_history_repo.get_view_history", return_value=[]),
+        patch("app.repositories.trivia_repo.fetch_trivia_from_db", return_value=rows),
+    ):
+        response = client.get(
+            "/trivia/feed",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert len(items) == 10
+    # 選択ジャンル +3 で歴史 row が先頭に来る
+    assert items[0]["id"] == "aa000000-0000-4000-8000-000000000099"
+
+
+def test_feed_personalized_viewed_items_are_excluded():
+    """視聴済み雑学はスコアに関係なく候補から除外される。"""
+    history_row = {
+        **_DB_ROWS[0],
+        "id": "aa000000-0000-4000-8000-000000000099",
+        "genre": "歴史・偉人",
+    }
+    rows = [history_row] + _DB_ROWS[1:]
+
+    with (
+        patch("app.dependencies.create_client", return_value=_auth_supabase()),
+        patch("app.repositories.preferences_repo.get_preferences", return_value=["歴史・偉人"]),
+        patch("app.repositories.bookmark_repo.list_bookmarks", return_value=[]),
+        # history_row は視聴済み
+        patch(
+            "app.repositories.view_history_repo.get_view_history",
+            return_value=["aa000000-0000-4000-8000-000000000099"],
+        ),
+        patch("app.repositories.trivia_repo.fetch_trivia_from_db", return_value=rows),
+    ):
+        response = client.get(
+            "/trivia/feed",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+
+    items = response.json()["items"]
+    ids = [item["id"] for item in items]
+    assert "aa000000-0000-4000-8000-000000000099" not in ids
+
+
+def test_feed_personalized_partial_data_failure_still_returns_feed():
+    """preferences 取得が失敗しても残りのデータでフィードを返す。"""
+    with (
+        patch("app.dependencies.create_client", return_value=_auth_supabase()),
+        patch(
+            "app.repositories.preferences_repo.get_preferences",
+            side_effect=RuntimeError("DB timeout"),
+        ),
+        patch("app.repositories.bookmark_repo.list_bookmarks", return_value=[]),
+        patch("app.repositories.view_history_repo.get_view_history", return_value=[]),
+        patch("app.repositories.trivia_repo.fetch_trivia_from_db", return_value=_DB_ROWS),
+    ):
+        response = client.get(
+            "/trivia/feed",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 10

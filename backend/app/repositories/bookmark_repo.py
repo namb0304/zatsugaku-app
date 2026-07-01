@@ -3,7 +3,7 @@ from supabase import create_client, ClientOptions
 from app.config import settings
 
 _TIMEOUT_SECS = 5
-_TRIVIA_COLUMNS = "id, title, summary, genre, source_title, source_url"
+_TRIVIA_COLUMNS = "id, title, summary, genre, tags, source_title, source_url"
 _BOOKMARK_SELECT = f"id, trivia_id, created_at, trivia({_TRIVIA_COLUMNS})"
 
 

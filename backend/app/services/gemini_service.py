@@ -19,9 +19,11 @@ class GeminiGenerationError(Exception):
 
 def _build_prompt(
     preferred_genres: list[str] | None,
+    preferred_tags: list[str] | None,
     excluded_topics: list[str] | None,
 ) -> str:
     preferred = ", ".join(preferred_genres) if preferred_genres else "なし"
+    tags = ", ".join(preferred_tags) if preferred_tags else "なし"
     excluded = ", ".join(excluded_topics) if excluded_topics else "なし"
     return f"""あなたは雑学アプリ用のコンテンツ生成AIです。
 ユーザーが横スワイプで短時間に読める雑学を10件生成してください。
@@ -40,6 +42,7 @@ def _build_prompt(
 - 断定しすぎず、雑学として自然に読める文章にする
 
 優先ジャンル: {preferred}
+優先タグ: {tags}
 避ける雑学IDまたは既出テーマ: {excluded}
 
 出力形式（JSONのみ、他のテキスト不要）:
@@ -60,6 +63,7 @@ def _build_prompt(
 
 def generate(
     preferred_genres: list[str] | None = None,
+    preferred_tags: list[str] | None = None,
     excluded_topics: list[str] | None = None,
 ) -> list[dict]:
     """
@@ -76,7 +80,7 @@ def generate(
             api_key=settings.GEMINI_API_KEY,
             http_options=types.HttpOptions(timeout=_TIMEOUT_MS),
         )
-        prompt = _build_prompt(preferred_genres, excluded_topics)
+        prompt = _build_prompt(preferred_genres, preferred_tags, excluded_topics)
         response = client.models.generate_content(
             model=settings.GEMINI_MODEL,
             contents=prompt,

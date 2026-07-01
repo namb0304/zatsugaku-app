@@ -82,16 +82,24 @@ export default function SwipePage() {
   useEffect(() => {
     let cancelled = false;
 
-    fetchTriviaFeed()
-      .then((items) => {
-        if (cancelled) return;
-        setCards(prioritizeUnviewed(shuffle(items), getViewedIds()));
-        setActiveIndex(0);
-        setFeedStatus(items.length > 0 ? "ok" : "empty");
-      })
-      .catch(() => {
-        if (!cancelled) setFeedStatus("error");
-      });
+    const load = async () => {
+      let token: string | null = null;
+      try {
+        token = await authService.getAccessToken();
+      } catch {
+        // 認証エラーはゲスト扱い
+      }
+      if (cancelled) return;
+      const items = await fetchTriviaFeed(token);
+      if (cancelled) return;
+      setCards(prioritizeUnviewed(shuffle(items), getViewedIds()));
+      setActiveIndex(0);
+      setFeedStatus(items.length > 0 ? "ok" : "empty");
+    };
+
+    load().catch(() => {
+      if (!cancelled) setFeedStatus("error");
+    });
 
     return () => {
       cancelled = true;
@@ -164,8 +172,12 @@ export default function SwipePage() {
     isPrefetchingRef.current = true;
     setPrefetchStatus("fetching");
 
-    generateTrivia()
-      .catch(() => fetchTriviaFeed())
+    authService
+      .getAccessToken()
+      .catch(() => null as string | null)
+      .then((token) =>
+        generateTrivia(token).catch(() => fetchTriviaFeed(token)),
+      )
       .then((items) => {
         if (items.length === 0) throw new Error("empty batch");
 

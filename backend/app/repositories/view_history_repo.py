@@ -15,6 +15,18 @@ def _client():
     )
 
 
+def get_view_history(user_id: str) -> list[str]:
+    """ユーザーの視聴済み trivia_id リストを返す。"""
+    resp = (
+        _client()
+        .table("view_history")
+        .select("trivia_id")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return [row["trivia_id"] for row in (resp.data or [])]
+
+
 def record_view(user_id: str, trivia_id: str) -> None:
     # 同じ (user_id, trivia_id) を重複して挿入しない
     _client().table("view_history").upsert(

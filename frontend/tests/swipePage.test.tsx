@@ -36,6 +36,7 @@ vi.mock("@/lib/swipeUtils", () => ({
 }));
 
 import * as api from "@/lib/api";
+import { authService } from "@/services/authService";
 import SwipePage from "@/app/swipe/page";
 
 const TRANSITION_WAIT_MS = 350;
@@ -282,6 +283,49 @@ describe("スワイプページ: Gemini 先読み", () => {
 
     // バッチ切り替え前なので次の先読みは始まらない
     expect(mockGenerate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("スワイプページ: パーソナライズ（token連携）", () => {
+  const mockFetch = vi.mocked(api.fetchTriviaFeed);
+  const mockGenerate = vi.mocked(api.generateTrivia);
+  const mockGetToken = vi.mocked(authService.getAccessToken);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFetch.mockReset();
+    mockGenerate.mockReset();
+    // 各テスト前にゲスト状態（null）へリセット
+    mockGetToken.mockResolvedValue(null);
+  });
+
+  it("ゲスト（token=null）でフィードを取得できる", async () => {
+    mockFetch.mockResolvedValue(makeCards(10, "feed"));
+    mockGenerate.mockResolvedValue(makeCards(10, "generated"));
+
+    render(<SwipePage />);
+
+    await waitFor(() =>
+      expect(screen.getByText("1 / 10")).toBeInTheDocument(),
+    );
+
+    // fetchTriviaFeed は null トークンで呼ばれる
+    expect(mockFetch).toHaveBeenCalledWith(null);
+  });
+
+  it("ログイン中はトークンを generateTrivia に渡す", async () => {
+    mockGetToken.mockResolvedValue("test-token");
+    mockFetch.mockResolvedValue(makeCards(10, "feed"));
+    mockGenerate.mockResolvedValue(makeCards(10, "generated"));
+
+    render(<SwipePage />);
+
+    await waitFor(() =>
+      expect(screen.getByText("1 / 10")).toBeInTheDocument(),
+    );
+    await waitFor(() => expect(mockGenerate).toHaveBeenCalledTimes(1));
+
+    expect(mockGenerate).toHaveBeenCalledWith("test-token");
   });
 });
 
