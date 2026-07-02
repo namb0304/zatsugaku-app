@@ -7,7 +7,7 @@ from app.services.personalization import score_items
 
 _FALLBACK_PATH = Path(__file__).resolve().parents[2] / "data" / "fallback.json"
 _FEED_SIZE = 10
-_PERSONALIZED_POOL_SIZE = 30
+_PERSONALIZED_POOL_SIZE = 100
 
 
 def _load_fallback() -> list[TriviaItem]:
@@ -95,7 +95,22 @@ def get_personalized_feed(user_id: str) -> list[TriviaItem]:
             except Exception:
                 pass
 
-    scored = score_items(items, preferred_genres, bookmark_genres, bookmark_tags, viewed_ids)
+    scored = score_items(
+        items,
+        preferred_genres,
+        bookmark_genres,
+        bookmark_tags,
+        viewed_ids,
+    )
+    if not scored and items:
+        # 現在の候補をすべて見終えた場合だけ再循環し、空フィードを避ける。
+        scored = score_items(
+            items,
+            preferred_genres,
+            bookmark_genres,
+            bookmark_tags,
+            set(),
+        )
     return scored[:_FEED_SIZE]
 
 

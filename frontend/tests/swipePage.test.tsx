@@ -401,3 +401,64 @@ describe("スワイプページ: 先読みフィードバック表示", () => {
     );
   });
 });
+
+describe("スワイプページ: セッション演出", () => {
+  const mockFetch = vi.mocked(api.fetchTriviaFeed);
+  const mockGenerate = vi.mocked(api.generateTrivia);
+  const mockAddBookmark = vi.mocked(api.addBookmark);
+  const mockGetToken = vi.mocked(authService.getAccessToken);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFetch.mockReset();
+    mockGenerate.mockReset();
+    mockAddBookmark.mockReset();
+    mockGetToken.mockResolvedValue(null);
+  });
+
+  it("カードの進行に合わせて朝から昼へ変化する", async () => {
+    mockFetch.mockResolvedValue(makeCards(10, "feed"));
+    mockGenerate.mockResolvedValue(makeCards(10, "generated"));
+
+    render(<SwipePage />);
+
+    await waitFor(() =>
+      expect(screen.getByText("1 / 10")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("朝")).toBeInTheDocument();
+
+    for (let i = 0; i < 3; i++) {
+      act(() => {
+        fireEvent.keyDown(document.body, { key: "ArrowRight" });
+      });
+    }
+
+    await waitFor(() =>
+      expect(screen.getByText("4 / 10")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("昼")).toBeInTheDocument();
+  });
+
+  it("ブックマーク成功時に保存アニメーションを表示する", async () => {
+    mockGetToken.mockResolvedValue("test-token");
+    mockFetch.mockResolvedValue(makeCards(10, "feed"));
+    mockGenerate.mockResolvedValue(makeCards(10, "generated"));
+    mockAddBookmark.mockResolvedValue(undefined);
+
+    render(<SwipePage />);
+
+    await waitFor(() =>
+      expect(screen.getByText("1 / 10")).toBeInTheDocument(),
+    );
+
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "ArrowUp" });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText("ブックマークしました")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("bookmark-effect")).toBeInTheDocument();
+    expect(mockAddBookmark).toHaveBeenCalledWith("feed-0", "test-token");
+  });
+});

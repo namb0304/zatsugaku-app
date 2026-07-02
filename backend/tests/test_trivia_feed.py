@@ -276,6 +276,32 @@ def test_feed_personalized_viewed_items_are_excluded():
     assert "aa000000-0000-4000-8000-000000000099" not in ids
 
 
+def test_feed_personalized_recycles_after_all_candidates_are_viewed():
+    """全候補を視聴済みでも空にせず、次の周回として10件返す。"""
+    viewed_ids = [row["id"] for row in _DB_ROWS]
+
+    with (
+        patch("app.dependencies.create_client", return_value=_auth_supabase()),
+        patch("app.repositories.preferences_repo.get_preferences", return_value=[]),
+        patch("app.repositories.bookmark_repo.list_bookmarks", return_value=[]),
+        patch(
+            "app.repositories.view_history_repo.get_view_history",
+            return_value=viewed_ids,
+        ),
+        patch(
+            "app.repositories.trivia_repo.fetch_trivia_from_db",
+            return_value=_DB_ROWS,
+        ),
+    ):
+        response = client.get(
+            "/trivia/feed",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 10
+
+
 def test_feed_personalized_partial_data_failure_still_returns_feed():
     """preferences 取得が失敗しても残りのデータでフィードを返す。"""
     with (

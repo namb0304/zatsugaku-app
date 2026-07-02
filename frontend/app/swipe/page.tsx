@@ -16,12 +16,53 @@ import {
 } from "@/lib/viewHistory";
 import { shuffle } from "@/lib/swipeUtils";
 import type { TriviaItem } from "@/types/trivia";
+import styles from "./swipe.module.css";
 
 const CENTER = 4.5;
 const TRANSITION_MS = 150;
+const BOOKMARK_EFFECT_MS = 850;
 
 type FeedStatus = "loading" | "error" | "empty" | "ok";
 type PrefetchStatus = "idle" | "fetching" | "ready";
+type BookmarkEffect = {
+  id: number;
+  title: string;
+};
+
+const JOURNEY_STAGES = [
+  {
+    label: "朝",
+    background:
+      "linear-gradient(180deg, #235866 0%, #18384a 52%, #101d31 100%)",
+    accent: "#7dd3fc",
+  },
+  {
+    label: "昼",
+    background:
+      "linear-gradient(180deg, #276678 0%, #1c4b61 52%, #12263b 100%)",
+    accent: "#67e8f9",
+  },
+  {
+    label: "夕",
+    background:
+      "linear-gradient(180deg, #7b4857 0%, #45344f 52%, #1d2138 100%)",
+    accent: "#fda4af",
+  },
+  {
+    label: "夜",
+    background:
+      "linear-gradient(180deg, #202b49 0%, #121a30 52%, #090f1d 100%)",
+    accent: "#a5b4fc",
+  },
+] as const;
+
+function getJourneyStage(index: number, total: number) {
+  const progress = total <= 1 ? 0 : index / (total - 1);
+  if (progress < 0.3) return 0;
+  if (progress < 0.6) return 1;
+  if (progress < 0.8) return 2;
+  return 3;
+}
 
 /** シャッフル + 先頭重複防止 */
 function arrangeBatch(
@@ -51,6 +92,8 @@ export default function SwipePage() {
   // ── UI 状態 ──────────────────────────────────────────────────────────
   const [activeIndex, setActiveIndex] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
+  const [bookmarkEffect, setBookmarkEffect] =
+    useState<BookmarkEffect | null>(null);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -69,6 +112,10 @@ export default function SwipePage() {
   const isSwitchingRef = useRef(false);
   const readyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const switchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bookmarkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bookmarkEffectIdRef = useRef(0);
+  const isBookmarkingRef = useRef(false);
 
   // prefers-reduced-motion（CSR のみで参照）
   const prefersReducedMotionRef = useRef(false);
@@ -229,6 +276,8 @@ export default function SwipePage() {
     () => () => {
       if (readyTimerRef.current) clearTimeout(readyTimerRef.current);
       if (switchTimerRef.current) clearTimeout(switchTimerRef.current);
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      if (bookmarkTimerRef.current) clearTimeout(bookmarkTimerRef.current);
     },
     [],
   );
@@ -264,25 +313,51 @@ export default function SwipePage() {
   }, []);
 
   // ── ブックマーク ─────────────────────────────────────────────────────
+  const showToast = useCallback((message: string, duration = 2000) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast(message);
+    toastTimerRef.current = setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, duration);
+  }, []);
+
   const handleBookmark = useCallback(async () => {
     const item = activeRef.current;
-    if (!item) return;
+    if (!item || isBookmarkingRef.current) return;
 
-    const token = await authService.getAccessToken();
+    let token: string | null;
+    try {
+      token = await authService.getAccessToken();
+    } catch {
+      showToast("ログイン状態を確認できませんでした");
+      return;
+    }
     if (!token) {
-      setToast("ブックマークするにはログインが必要です");
-      setTimeout(() => setToast(null), 2500);
+      showToast("ブックマークするにはログインが必要です", 2500);
       return;
     }
 
+    isBookmarkingRef.current = true;
     try {
       await addBookmark(item.id, token);
-      setToast("ブックマークしました");
+      bookmarkEffectIdRef.current += 1;
+      setBookmarkEffect({
+        id: bookmarkEffectIdRef.current,
+        title: item.title,
+      });
+      if (bookmarkTimerRef.current) clearTimeout(bookmarkTimerRef.current);
+      bookmarkTimerRef.current = setTimeout(() => {
+        setBookmarkEffect(null);
+        bookmarkTimerRef.current = null;
+      }, BOOKMARK_EFFECT_MS);
+      showToast("ブックマークしました");
     } catch {
-      setToast("ブックマークに失敗しました");
+      showToast("ブックマークに失敗しました");
+    } finally {
+      isBookmarkingRef.current = false;
     }
-    setTimeout(() => setToast(null), 2000);
-  }, []);
+  }, [showToast]);
 
   // ── 初回取得リトライ ─────────────────────────────────────────────────
   const retryInitial = () => {
@@ -387,21 +462,57 @@ export default function SwipePage() {
   }
 
   const total = cards.length;
+  const stageIndex = getJourneyStage(activeIndex, total);
+  const journeyStage = JOURNEY_STAGES[stageIndex];
+  const progressPercent = ((activeIndex + 1) / total) * 100;
 
   // ── メイン ─────────────────────────────────────────────────────────────
   return (
     <main
-      className="relative min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 text-white overflow-hidden touch-none select-none"
+      className="relative min-h-screen bg-[#090f1d] text-white overflow-hidden touch-none select-none"
       onPointerDown={onPointerDown}
       onPointerUp={onPointerUp}
       onPointerCancel={() => {
         pointer.current = null;
       }}
     >
+      {/* 10枚の進行に合わせて朝から夜へ背景を切り替える */}
+      <div aria-hidden="true" className="absolute inset-0">
+        {JOURNEY_STAGES.map((stage, index) => (
+          <div
+            key={stage.label}
+            className="absolute inset-0 transition-opacity duration-700 motion-reduce:transition-none"
+            style={{
+              background: stage.background,
+              opacity: stageIndex === index ? 1 : 0,
+            }}
+          />
+        ))}
+      </div>
+
       {/* トースト */}
       {toast && (
-        <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-black/70 text-white px-4 py-2 rounded-full text-sm z-50">
+        <div
+          role="status"
+          aria-live="polite"
+          className="absolute top-24 left-1/2 z-50 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/15 bg-black/70 px-4 py-2 text-sm text-white shadow-lg backdrop-blur-sm"
+        >
           {toast}
+        </div>
+      )}
+
+      {/* ブックマーク成功時の短い保存アニメーション */}
+      {bookmarkEffect && (
+        <div
+          key={bookmarkEffect.id}
+          data-testid="bookmark-effect"
+          aria-label={`${bookmarkEffect.title}をブックマークしました`}
+          className="pointer-events-none absolute inset-0 z-40"
+        >
+          <div className={styles.bookmarkFlight}>
+            <span className={styles.bookmarkShape} aria-hidden="true" />
+            <span className={styles.bookmarkLabel}>保存</span>
+          </div>
         </div>
       )}
 
@@ -437,9 +548,15 @@ export default function SwipePage() {
           isSwitching ? "opacity-0" : "opacity-100"
         }`}
       >
-        <div className="text-center max-w-xl">
+        <div
+          key={active.id}
+          className={`${styles.cardContent} max-w-xl text-center`}
+        >
           <div className="mb-4 flex flex-wrap items-center justify-center gap-2">
-            <span className="rounded-full bg-blue-400/10 px-2.5 py-1 text-xs font-medium text-blue-300">
+            <span
+              className="rounded-full border border-white/10 bg-black/15 px-2.5 py-1 text-xs font-medium"
+              style={{ color: journeyStage.accent }}
+            >
               {active.genre}
             </span>
             {active.tags.slice(0, 3).map((tag) => (
@@ -451,10 +568,12 @@ export default function SwipePage() {
               </span>
             ))}
           </div>
-          <h1 className="text-6xl sm:text-4xl font-bold mb-4">
+          <h1 className="mb-4 text-4xl font-bold sm:text-5xl">
             {active.title}
           </h1>
-          <p className="text-slate-300 text-sm sm:text-base">{active.summary}</p>
+          <p className="text-sm leading-7 text-slate-200 sm:text-base">
+            {active.summary}
+          </p>
           <a
             href={active.source_url}
             target="_blank"
@@ -468,11 +587,23 @@ export default function SwipePage() {
         </div>
       </div>
 
-      {/* カウンター */}
-      <div className="relative flex justify-center px-6 pt-10">
-        <span className="text-xs text-slate-400">
-          {activeIndex + 1} / {total}
-        </span>
+      {/* 時間帯とセッション進捗 */}
+      <div className="absolute top-16 left-1/2 z-30 w-36 -translate-x-1/2">
+        <div className="flex items-center justify-between text-[11px] text-white/60">
+          <span>{journeyStage.label}</span>
+          <span>
+            {activeIndex + 1} / {total}
+          </span>
+        </div>
+        <div className="mt-2 h-0.5 overflow-hidden rounded-full bg-white/15">
+          <div
+            className="h-full rounded-full transition-[width,background-color] duration-500 motion-reduce:transition-none"
+            style={{
+              width: `${progressPercent}%`,
+              backgroundColor: journeyStage.accent,
+            }}
+          />
+        </div>
       </div>
 
       {/* カード fan（既存レイアウト維持） */}
@@ -501,7 +632,8 @@ export default function SwipePage() {
                 }}
                 data-z={zIndex}
                 onClick={() => setActiveIndex(i)}
-                className="absolute left-1/2 bottom-0 bg-white text-slate-900 rounded-lg border border-gray-200 shadow-md"
+                aria-current={isActive ? "true" : undefined}
+                className="absolute left-1/2 bottom-0 rounded-lg border bg-white text-slate-900 shadow-md transition-[transform,border-color,box-shadow] duration-300 ease-out motion-reduce:transition-none"
                 style={{
                   width: "72px",
                   height: "96px",
@@ -513,6 +645,10 @@ export default function SwipePage() {
                     scale(${scale})
                   `,
                   zIndex,
+                  borderColor: isActive ? journeyStage.accent : "#e5e7eb",
+                  boxShadow: isActive
+                    ? `0 12px 28px color-mix(in srgb, ${journeyStage.accent} 24%, transparent)`
+                    : undefined,
                 }}
               >
                 <div className="w-full h-full flex items-center justify-center px-1">
