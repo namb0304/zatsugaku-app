@@ -97,6 +97,54 @@ cd backend
 
 ---
 
+## Vercelへデプロイ
+
+ルートの`vercel.json`で、Next.jsとFastAPIを1つのVercel Services
+プロジェクトとして構成している。
+
+```text
+/                 -> frontend（Next.js）
+/health           -> backend（FastAPI）
+/trivia/*         -> backend（FastAPI）
+/bookmarks*       -> backend（FastAPI）
+/me/*             -> backend（FastAPI）
+```
+
+Vercelのプロジェクト作成画面では以下を指定する。
+
+```text
+Application Preset: Services
+Root Directory: ./
+```
+
+Vercelに登録する環境変数:
+
+```text
+NEXT_PUBLIC_SUPABASE_URL
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+SUPABASE_URL
+SUPABASE_SECRET_KEY
+GEMINI_API_KEY
+GEMINI_MODEL
+FRONTEND_ORIGIN
+```
+
+`NEXT_PUBLIC_API_BASE_URL`は本番では登録しない。同一ドメインのFastAPIへ
+相対URLで接続する。ローカル開発では`frontend/.env.local`の
+`NEXT_PUBLIC_API_BASE_URL=http://localhost:8000`を使用する。
+
+デプロイ後:
+
+1. `FRONTEND_ORIGIN`を本番URL（例:
+   `https://zatsugaku-app.vercel.app`）へ設定して再デプロイする
+2. Supabase AuthのSite URLを本番URLへ変更する
+3. Supabase AuthのRedirect URLsへ`https://本番URL/**`を追加する
+4. `https://本番URL/health`が`{"status":"ok"}`を返すことを確認する
+
+`SUPABASE_SECRET_KEY`と`GEMINI_API_KEY`はブラウザ用コードから参照しない。
+
+---
+
 ## スワイプ操作（/swipe）
 
 | 操作 | 動作 |

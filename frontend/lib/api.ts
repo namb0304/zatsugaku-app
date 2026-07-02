@@ -15,9 +15,19 @@ export type BookmarkItem = {
   created_at: string;
 };
 
-const API_BASE = (
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"
-).replace(/\/$/, "");
+export function resolveApiBase(
+  configuredBase: string | undefined,
+  nodeEnv: string | undefined,
+): string {
+  const defaultBase =
+    nodeEnv === "production" ? "" : "http://localhost:8000";
+  return (configuredBase ?? defaultBase).replace(/\/$/, "");
+}
+
+const API_BASE = resolveApiBase(
+  process.env.NEXT_PUBLIC_API_BASE_URL,
+  process.env.NODE_ENV,
+);
 const REQUEST_TIMEOUT_MS = 10_000;
 const GENERATION_TIMEOUT_MS = 60_000;
 

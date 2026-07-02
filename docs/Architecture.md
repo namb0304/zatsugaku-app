@@ -13,9 +13,10 @@
 | DB | Supabase PostgreSQL |
 | 認証 | Supabase Auth |
 | AI | Gemini API |
-| デプロイ | フロントはVercel、バックエンドはRenderなど |
+| デプロイ | Vercel Services（Next.js + FastAPI） |
 
-デプロイは「やる気があれば」とされているが、発表で見せるなら早めに一度試す。
+ルートの`vercel.json`でフロントエンドとバックエンドを1つのVercel
+プロジェクトとしてデプロイする。
 
 ---
 
@@ -24,12 +25,12 @@
 ```text
 ユーザー
   ↓
-Next.js
-  ↓
-FastAPI
-  ├─ Gemini API
-  └─ Supabase PostgreSQL
-        └─ Supabase Auth
+Vercel Services
+  ├─ Next.js
+  └─ FastAPI
+       ├─ Gemini API
+       └─ Supabase PostgreSQL
+            └─ Supabase Auth
 ```
 
 ---
